@@ -1,0 +1,29 @@
+{
+  "activation": {
+    "username": "ccequlamova",
+    "password": "dealeronline",
+    "ph1p": "10",
+    "ph1n": "2210462",
+    "email": "sgaziyev@azercell.com",
+    "mode": "parallel",
+    "test_data": [
+      {
+        "MSISDN": "102989146",
+        "DOC_NUMBER": "AA0877974",
+        "DOC_PIN": "70HF8GF",
+        "SIMCARD": "2411010161753",
+        "PLAN_TYPE": "PostPaid",
+        "PLAN_TYPE_REG": "PostPaid",
+        "TARIFF": "371",
+        "TARIFF_TYPE": "flat"
+      }
+    ]
+  },
+  "planning": {
+    "username": "ccequlamova",
+    "password": "Yltak_141012#",
+    "plan_file": "",
+    "update_file": "",
+    "assign_file": ""
+  }
+}
