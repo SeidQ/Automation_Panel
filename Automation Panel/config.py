@@ -136,6 +136,9 @@ STRINGS = {
         "val_not_selected": "not selected — please fill in.",
         "val_not_found":    "file not found:",
         "val_error_status": "Error",
+        "hist_clear":       "🗑  Clear History",
+        "hist_empty":       "No activation history yet.",
+        "hist_filter_all":  "All",
     },
     "az": {
         "tab_planning":    "  📋 Nömrə Planlanması  ",
@@ -187,6 +190,9 @@ STRINGS = {
         "val_not_selected": "seçilməyib — zəhmət olmasa doldurun.",
         "val_not_found":    "fayl tapılmadı:",
         "val_error_status": "Xəta",
+        "hist_clear":       "🗑  Tarixçəni Təmizlə",
+        "hist_empty":       "Hələ aktivasiya tarixçəsi yoxdur.",
+        "hist_filter_all":  "Hamısı",
     },
     "ru": {
         "tab_planning":    "  📋 Планирование  ",
@@ -238,6 +244,9 @@ STRINGS = {
         "val_not_selected": "не выбран — пожалуйста, заполните.",
         "val_not_found":    "файл не найден:",
         "val_error_status": "Ошибка",
+        "hist_clear":       "🗑  Очистить историю",
+        "hist_empty":       "История активаций пока пуста.",
+        "hist_filter_all":  "Все",
     },
 }
 

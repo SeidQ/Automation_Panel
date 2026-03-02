@@ -46,6 +46,7 @@ class App(ctk.CTk):
         self._tab_plan  = None
         self._tab_act   = None
         self._tab_ms    = None
+        self._hist_win  = None
 
         try:
             BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -134,6 +135,14 @@ class App(ctk.CTk):
             command=self._on_lang_change
         ).pack(side="right", padx=6)
 
+        self._hist_btn = ctk.CTkButton(
+            rb, text="📋 History",
+            width=90, height=30, font=("Segoe UI", 11),
+            fg_color="#251540", hover_color="#3D2260",
+            text_color="#8B75B0", corner_radius=8,
+            state="disabled", command=self._open_history)
+        self._hist_btn.pack(side="right", padx=6)
+
         # ── Tabs ──────────────────────────────────────
         content = ctk.CTkFrame(outer, fg_color=("#120A1E", "#F3F0F8"))
         content.grid(row=1, column=0, sticky="nsew", padx=18, pady=(10, 0))
@@ -157,6 +166,7 @@ class App(ctk.CTk):
             self._tabview.add(T(key))
         self._tabview._segmented_button.configure(
             font=("Segoe UI", 13, "bold"), height=42)
+        self._tabview.configure(command=self._on_tab_change)
 
         # Instantiate tab controllers
         self._tab_plan = TabPlanning(
@@ -167,6 +177,7 @@ class App(ctk.CTk):
             self._log_q, self._res_q, self._stop_ev, T)
         self._tab_ms = TabMSISDN(
             self._tabview.tab(T("tab_msisdn")), T)
+        self.after(100, self._on_tab_change)
 
         # ── Footer ────────────────────────────────────
         footer = ctk.CTkFrame(outer, fg_color="#1C1030",
@@ -182,6 +193,71 @@ class App(ctk.CTk):
                      font=("Consolas", 9),
                      text_color=("#3D2260", "#C4B0DC")
                      ).pack(side="right", padx=14)
+
+    # ══════════════════════════════════════════════════
+    #  TAB CHANGE — enable/disable history button
+    # ══════════════════════════════════════════════════
+    def _on_tab_change(self):
+        try:
+            is_act = (self._tabview.get() == T("tab_activation"))
+            self._hist_btn.configure(
+                state="normal"       if is_act else "disabled",
+                text_color="#EDE8F5" if is_act else "#8B75B0",
+                fg_color="#3D2260"   if is_act else "#251540")
+        except Exception:
+            pass
+
+    def _open_history(self):
+        if self._hist_win and self._hist_win.winfo_exists():
+            self._hist_win.lift()
+            self._hist_win.focus_force()
+            if self._tab_act:
+                self._tab_act._hist_refresh()
+            return
+
+        win = ctk.CTkToplevel(self)
+        win.title("📋  Activation History")
+        win.configure(fg_color=("#120A1E", "#F3F0F8"))
+        win.transient(self)
+        win.lift()
+        win.focus_force()
+        try:
+            import os as _os
+            _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
+            if _os.path.exists(_ico):
+                win.iconbitmap(_ico)
+        except Exception:
+            pass
+        try:
+            from ctypes import windll, byref, sizeof, c_int
+            win.update_idletasks()
+            hwnd = windll.user32.GetParent(win.winfo_id())
+            windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
+        except Exception:
+            pass
+        win.minsize(820, 500)
+        self.update_idletasks()
+        px, py = self.winfo_rootx(), self.winfo_rooty()
+        pw, ph = self.winfo_width(), self.winfo_height()
+        ww, wh = 860, 580
+        win.geometry(f"{ww}x{wh}+{px+(pw-ww)//2}+{py+(ph-wh)//2}")
+        win.rowconfigure(0, weight=1)
+        win.columnconfigure(0, weight=1)
+
+        inner = ctk.CTkFrame(win, fg_color=("#120A1E", "#F3F0F8"))
+        inner.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        inner.rowconfigure(0, weight=0)
+        inner.rowconfigure(1, weight=0)
+        inner.rowconfigure(2, weight=0)
+        inner.rowconfigure(3, weight=1)
+        inner.columnconfigure(0, weight=1)
+
+        if self._tab_act:
+            self._tab_act.build_history_tab(inner)
+
+        self._hist_win = win
+        win.protocol("WM_DELETE_WINDOW",
+                     lambda: setattr(self, "_hist_win", None) or win.destroy())
 
     # ══════════════════════════════════════════════════
     #  POLL LOOP  (120 ms → 80 ms for snappier log)
@@ -294,6 +370,7 @@ class App(ctk.CTk):
         cached_ms   = self._tab_ms.get_cached_data() if self._tab_ms else None
         act_data    = list(self._tab_act._test_data) if self._tab_act else None
         act_results = list(self._tab_act._results)  if self._tab_act else None
+        act_history = list(self._tab_act._history)  if self._tab_act else None
 
         cfg.CURRENT_LANG = choice.lower()
 
@@ -304,6 +381,7 @@ class App(ctk.CTk):
 
         if act_data    is not None: self._tab_act._test_data = act_data
         if act_results is not None: self._tab_act._results   = act_results
+        if act_history is not None: self._tab_act._history   = act_history
         self._tab_act._render_data()
 
         if cached_ms:

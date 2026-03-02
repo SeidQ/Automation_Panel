@@ -17,11 +17,48 @@ from config import (C, FONT_UI, FONT_UI_B, FONT_MONO_S, FONT_LABEL,
 from widgets import mk_section, mk_field, mk_divider, mk_panel_header, mk_label
 
 
+
+# ══════════════════════════════════════════════════════
+#  DIALOG HELPER — center on parent monitor
+# ══════════════════════════════════════════════════════
+def _center_on_parent(dlg, parent, w=480, h=600):
+    parent.update_idletasks()
+    px, py = parent.winfo_rootx(), parent.winfo_rooty()
+    pw, ph = parent.winfo_width(), parent.winfo_height()
+    dlg.geometry(f"{w}x{h}+{px+(pw-w)//2}+{py+(ph-h)//2}")
+
+
+def _style_dialog(dlg):
+    """Dark title bar + app icon for dialogs."""
+    import os as _os
+    try:
+        _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
+        if _os.path.exists(_ico):
+            dlg.iconbitmap(_ico)
+    except Exception:
+        pass
+    try:
+        from ctypes import windll, byref, sizeof, c_int
+        dlg.update_idletasks()
+        hwnd = windll.user32.GetParent(dlg.winfo_id())
+        windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
+    except Exception:
+        pass
+
 # ══════════════════════════════════════════════════════
 #  PIPELINE STEPS
 # ══════════════════════════════════════════════════════
 STEPS = ["Login", "Check MHM", "Register"]
 
+# Tariff display names
+TARIFF_RCODE_MAP = {
+    "371": "Yeni Her Yere",
+    "939": "SuperSen 3GB",
+    "940": "SuperSen 6GB",
+    "941": "SuperSen 10GB",
+    "942": "SuperSen 20GB",
+    "943": "SuperSen 30GB",
+}
 
 # ══════════════════════════════════════════════════════
 #  API HELPERS
@@ -116,14 +153,14 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
 
     def log(step_idx, msg, level="info", done=False, error=False):
         log_q.put({
-            "ts":    datetime.now().strftime("%H:%M:%S"),
-            "msg":   msg,
-            "level": level,
+            "ts":     datetime.now().strftime("%H:%M:%S"),
+            "msg":    msg,
+            "level":  level,
             "msisdn": msisdn,
-            "step":  step_idx,
-            "total": len(STEPS),
-            "done":  done,
-            "error": error,
+            "step":   step_idx,
+            "total":  len(STEPS),
+            "done":   done,
+            "error":  error,
         })
 
     try:
@@ -146,6 +183,7 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
         log(2, "Registration complete", "success", done=True)
 
         result_q.put({"MSISDN": msisdn, "PLAN_TYPE": data["PLAN_TYPE"],
+                      "TARIFF": data.get("TARIFF", ""),
                       "TARIFF_TYPE": tariff_label, "STATUS": "PASSED", "ERROR": ""})
 
     except Exception as e:
@@ -156,6 +194,9 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
         elif "registerCustomer" in str(e):
             step_idx = 2
         log(step_idx, msg, "error", done=True, error=True)
+        result_q.put({"MSISDN": msisdn, "PLAN_TYPE": data["PLAN_TYPE"],
+                      "TARIFF": data.get("TARIFF", ""),
+                      "TARIFF_TYPE": tariff_label, "STATUS": "FAILED", "ERROR": msg})
 
 
 # ══════════════════════════════════════════════════════
@@ -176,7 +217,6 @@ class MsisdnCard:
         hdr = ctk.CTkFrame(self._frame, fg_color="transparent")
         hdr.pack(fill="x", padx=12, pady=(10, 6))
 
-        # Index badge
         badge = ctk.CTkFrame(hdr, fg_color=("#5C2483", "#5C2483"),
                              width=26, height=26, corner_radius=6)
         badge.pack(side="left", padx=(0, 8))
@@ -209,7 +249,7 @@ class MsisdnCard:
         steps_row = ctk.CTkFrame(self._frame, fg_color="transparent")
         steps_row.pack(fill="x", padx=14, pady=(0, 4))
 
-        self._step_widgets = []  # (icon_lbl, name_lbl)
+        self._step_widgets = []
         for i, name in enumerate(STEPS):
             sf = ctk.CTkFrame(steps_row, fg_color="transparent")
             sf.pack(side="left")
@@ -289,6 +329,7 @@ class TabActivation:
         self._T        = T
         self._running  = False
         self._results  = []
+        self._history  = []
         self._test_data = deepcopy(DEFAULT_TEST_DATA)
         self._sel_row  = None
         self._cards: dict = {}
@@ -495,7 +536,6 @@ class TabActivation:
         passed = sum(1 for r in self._results if r["STATUS"] == "PASSED")
         failed = sum(1 for r in self._results if r["STATUS"] == "FAILED")
 
-        # Summary header
         hcard = ctk.CTkFrame(self._console, fg_color=("#5C2483", "#5C2483"), corner_radius=12)
         hcard.pack(fill="x", padx=6, pady=(6, 10))
         ctk.CTkLabel(hcard, text=T("summary_title"),
@@ -518,7 +558,6 @@ class TabActivation:
                          font=("Segoe UI", 9),
                          text_color=("#8B75B0", "#6B5A8A")).pack(padx=14, pady=(0, 6))
 
-        # Column headers
         col_hdr = ctk.CTkFrame(self._console, fg_color=("#251540", "#EDE8F5"), corner_radius=8)
         col_hdr.pack(fill="x", padx=6, pady=(0, 4))
         for txt, w in [("#", 32), ("MSISDN", 120), ("Plan", 90),
@@ -533,15 +572,13 @@ class TabActivation:
                                 fill="x" if not w else None,
                                 expand=(not w))
 
-        # Result rows
         for i, r in enumerate(self._results, 1):
             ok     = r["STATUS"] == "PASSED"
             row_bg = "#0B2210" if ok else "#2A0A0A"
             bdr    = C["success"] if ok else C["error"]
 
             rc = ctk.CTkFrame(self._console, fg_color=row_bg,
-                              corner_radius=10, border_width=1,
-                              border_color=bdr)
+                              corner_radius=10, border_width=1, border_color=bdr)
             rc.pack(fill="x", padx=6, pady=2)
 
             ctk.CTkLabel(rc, text=str(i), font=("Consolas", 11),
@@ -566,8 +603,7 @@ class TabActivation:
                 ctk.CTkLabel(rc, text=f"↳ {r['ERROR']}",
                              font=("Consolas", 10),
                              text_color=("#EF4444", "#DC2626"), anchor="w"
-                             ).pack(side="left", padx=8, pady=9,
-                                    fill="x", expand=True)
+                             ).pack(side="left", padx=8, pady=9, fill="x", expand=True)
 
     # ══════════════════════════════════════════════════
     #  RUN / CANCEL
@@ -616,13 +652,11 @@ class TabActivation:
                     run_single(d, self.BASE_URL, username, password,
                                consts, self._log_q, self._result_q, self._stop_ev)
 
-            # Always re-enable buttons when work finishes
             self._tab.after(100, self._force_done)
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _force_done(self):
-        """Called from worker thread via after() — always resets button states."""
         self._running = False
         self._run_btn.configure(state="normal")
         self._cancel_btn.configure(state="disabled")
@@ -636,7 +670,7 @@ class TabActivation:
         self._cancel_btn.configure(state="disabled")
 
     # ══════════════════════════════════════════════════
-    #  PUBLIC API  (called by App poll loop)
+    #  PUBLIC API
     # ══════════════════════════════════════════════════
     def is_running(self):
         return self._running
@@ -661,6 +695,10 @@ class TabActivation:
         self._cancel_btn.configure(state="disabled")
         passed = sum(1 for r in self._results if r["STATUS"] == "PASSED")
         failed = sum(1 for r in self._results if r["STATUS"] == "FAILED")
+        for r in self._results:
+            entry = dict(r)
+            entry["TIME"] = datetime.now().strftime("%H:%M:%S")
+            self._history.append(entry)
         self._show_summary()
         return passed, failed
 
@@ -681,6 +719,223 @@ class TabActivation:
         self._res_summary.configure(text="—", text_color=("#8B75B0", "#6B5A8A"))
         self._progress_lbl.configure(text="")
         self._show_placeholder()
+
+    # ══════════════════════════════════════════════════
+    #  HISTORY WINDOW  (called from App._open_history)
+    # ══════════════════════════════════════════════════
+    def build_history_tab(self, parent):
+        T = self._T
+
+        # ── Filter card ───────────────────────────────
+        fc = ctk.CTkFrame(parent, fg_color=("#1C1030", "#FFFFFF"),
+                          corner_radius=14, border_width=1,
+                          border_color=("#3D2260", "#C4B0DC"))
+        fc.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 6))
+        fc.columnconfigure((0, 1, 2), weight=1)
+
+        ctk.CTkLabel(fc, text="🔎  FILTER & SEARCH",
+                     font=("Segoe UI", 10, "bold"),
+                     text_color=("#5C2483", "#5C2483")
+                     ).grid(row=0, column=0, columnspan=3,
+                            sticky="w", padx=16, pady=(10, 4))
+
+        # ── Column 0: MSISDN search ───────────────────
+        col0 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
+        col0.grid(row=1, column=0, sticky="nsew", padx=(12, 5), pady=(0, 12))
+        ctk.CTkLabel(col0, text="📱  MSISDN",
+                     font=("Segoe UI", 10, "bold"),
+                     text_color=("#8B75B0", "#6B5A8A")
+                     ).pack(anchor="w", padx=12, pady=(8, 3))
+        self._hist_msisdn_var = ctk.StringVar()
+        ctk.CTkEntry(
+            col0,
+            textvariable=self._hist_msisdn_var,
+            placeholder_text="Type to search...",
+            fg_color=("#1C1030", "#FFFFFF"),
+            border_color=("#3D2260", "#C4B0DC"),
+            text_color=("#EDE8F5", "#1A0A2E"),
+            placeholder_text_color=("#3D2260", "#C4B0DC"),
+            font=("Consolas", 12), height=36, corner_radius=8
+        ).pack(fill="x", padx=12, pady=(0, 10))
+        self._hist_msisdn_var.trace_add("write", lambda *_: self._hist_refresh())
+
+        # ── Column 1: Tariff dropdown ─────────────────
+        col1 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
+        col1.grid(row=1, column=1, sticky="nsew", padx=5, pady=(0, 12))
+        ctk.CTkLabel(col1, text="📋  TARIFF",
+                     font=("Segoe UI", 10, "bold"),
+                     text_color=("#8B75B0", "#6B5A8A")
+                     ).pack(anchor="w", padx=12, pady=(8, 3))
+        self._hist_tariff_var = ctk.StringVar(value="All Tariffs")
+        ctk.CTkOptionMenu(
+            col1,
+            values=["All Tariffs"] + list(TARIFF_RCODE_MAP.values()),
+            variable=self._hist_tariff_var,
+            font=("Segoe UI", 11),
+            fg_color=("#1C1030", "#FFFFFF"),
+            button_color=("#5C2483", "#5C2483"),
+            button_hover_color=("#7C6EB0", "#7C6EB0"),
+            dropdown_fg_color=("#1C1030", "#FFFFFF"),
+            text_color=("#EDE8F5", "#1A0A2E"),
+            dropdown_text_color="#EDE8F5",
+            dropdown_hover_color="#3D2260",
+            height=36, corner_radius=8,
+            command=lambda _: self._hist_refresh()
+        ).pack(fill="x", padx=12, pady=(0, 10))
+
+        # ── Column 2: Plan + Status chips ────────────
+        col2 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
+        col2.grid(row=1, column=2, sticky="nsew", padx=(5, 12), pady=(0, 12))
+
+        # Plan chips
+        ctk.CTkLabel(col2, text="💳  PLAN TYPE",
+                     font=("Segoe UI", 10, "bold"),
+                     text_color=("#8B75B0", "#6B5A8A")
+                     ).pack(anchor="w", padx=12, pady=(8, 3))
+        plan_row = ctk.CTkFrame(col2, fg_color="transparent")
+        plan_row.pack(fill="x", padx=12, pady=(0, 6))
+        plan_row.columnconfigure((0, 1, 2), weight=1)
+        self._hist_plan_var = ctk.StringVar(value="All")
+        self._plan_btns = {}
+        for col_idx, (val, lbl) in enumerate([("All", "All"), ("PostPaid", "PostPaid"), ("Prepaid", "Prepaid")]):
+            b = ctk.CTkButton(
+                plan_row, text=lbl, height=28,
+                font=("Segoe UI", 10, "bold"), corner_radius=7,
+                fg_color=("#5C2483", "#5C2483") if val == "All" else ("#3D2260", "#C4B0DC"),
+                hover_color=("#7C6EB0", "#7C6EB0"),
+                text_color="white",
+                command=lambda v=val: self._set_plan_chip(v))
+            b.grid(row=0, column=col_idx, padx=(0, 3) if col_idx < 2 else 0, sticky="ew")
+            self._plan_btns[val] = b
+
+        # ── Stats bar ─────────────────────────────────
+        self._hist_stats_bar = ctk.CTkFrame(parent, fg_color=("#1C1030", "#FFFFFF"),
+                                            corner_radius=10, height=36)
+        self._hist_stats_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
+        self._hist_stats_bar.pack_propagate(False)
+        self._hist_stats_lbl = ctk.CTkLabel(
+            self._hist_stats_bar, text="",
+            font=("Segoe UI", 11), text_color=("#8B75B0", "#6B5A8A"))
+        self._hist_stats_lbl.pack(side="left", padx=14)
+
+        # ── Column headers ────────────────────────────
+        col_hdr = ctk.CTkFrame(parent, fg_color=("#251540", "#EDE8F5"),
+                               corner_radius=8, height=34)
+        col_hdr.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 4))
+        col_hdr.pack_propagate(False)
+        for txt, w in [("#", 32), ("Time", 72), ("MSISDN", 120),
+                       ("Plan", 88), ("Tariff", 130), ("Status", 108), ("Note", 0)]:
+            ctk.CTkLabel(col_hdr, text=txt,
+                         font=("Segoe UI", 10, "bold"),
+                         text_color=("#8B75B0", "#6B5A8A"),
+                         width=w or 0, anchor="w"
+                         ).pack(side="left",
+                                padx=(12 if txt == "#" else 4, 4),
+                                pady=7,
+                                fill="x" if not w else None,
+                                expand=(not w))
+
+        # ── Scrollable rows ───────────────────────────
+        self._hist_scroll = ctk.CTkScrollableFrame(
+            parent, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12,
+            border_width=1, border_color=("#3D2260", "#C4B0DC"),
+            scrollbar_button_color=("#3D2260", "#C4B0DC"),
+            scrollbar_button_hover_color=("#7C6EB0", "#7C6EB0"))
+        self._hist_scroll.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 8))
+        self._hist_scroll.columnconfigure(0, weight=1)
+
+        self._hist_refresh()
+
+    # ── Chip state helpers ────────────────────────────
+    def _set_plan_chip(self, val):
+        self._hist_plan_var.set(val)
+        for v, btn in self._plan_btns.items():
+            btn.configure(fg_color=("#5C2483", "#5C2483") if v == val else ("#3D2260", "#C4B0DC"))
+        self._hist_refresh()
+
+    def _set_status_chip(self, val):
+        self._hist_status_var.set(val)
+        for v, btn in self._status_btns.items():
+            active = v == val
+            btn.configure(fg_color=self._status_colors[v] if active else "#2A1A2A")
+        self._hist_refresh()
+
+    # ── Refresh list ──────────────────────────────────
+    def _hist_refresh(self):
+        if not hasattr(self, "_hist_scroll"):
+            return
+        for w in self._hist_scroll.winfo_children():
+            w.destroy()
+
+        T = self._T
+
+        msisdn_q = self._hist_msisdn_var.get().strip() if hasattr(self, "_hist_msisdn_var") else ""
+        tariff_q = self._hist_tariff_var.get()         if hasattr(self, "_hist_tariff_var") else "All Tariffs"
+        plan_q   = self._hist_plan_var.get()           if hasattr(self, "_hist_plan_var")   else "All"
+        status_q = "PASSED"
+
+        rows = list(self._history)
+
+        if msisdn_q:
+            rows = [r for r in rows if msisdn_q in r.get("MSISDN", "")]
+        if tariff_q != "All Tariffs":
+            rows = [r for r in rows
+                    if TARIFF_RCODE_MAP.get(r.get("TARIFF", ""), "") == tariff_q]
+        if plan_q != "All":
+            rows = [r for r in rows if r.get("PLAN_TYPE", "") == plan_q]
+        if status_q != "All":
+            rows = [r for r in rows if r.get("STATUS", "") == status_q]
+
+        total  = len(rows)
+        passed = sum(1 for r in rows if r.get("STATUS") == "PASSED")
+        failed = total - passed
+        if hasattr(self, "_hist_stats_lbl"):
+            self._hist_stats_lbl.configure(
+                text=f"  {total} record{'s' if total != 1 else ''}  ·  ✅ {passed}  ·  ❌ {failed}")
+
+        if not rows:
+            ctk.CTkLabel(self._hist_scroll,
+                         text=T("hist_empty"),
+                         font=("Segoe UI", 12),
+                         text_color=("#8B75B0", "#6B5A8A")).pack(pady=32)
+            return
+
+        for i, r in enumerate(reversed(rows), 1):
+            ok     = r.get("STATUS") == "PASSED"
+            row_bg = "#0B2210" if ok else "#2A0A0A"
+            bdr    = "#22C55E" if ok else "#EF4444"
+
+            rc = ctk.CTkFrame(self._hist_scroll, fg_color=row_bg,
+                              corner_radius=10, border_width=1, border_color=bdr)
+            rc.pack(fill="x", padx=4, pady=2)
+
+            ctk.CTkLabel(rc, text=str(i), font=("Consolas", 11),
+                         text_color=("#8B75B0", "#6B5A8A"), width=32, anchor="w"
+                         ).pack(side="left", padx=(12, 4), pady=8)
+            ctk.CTkLabel(rc, text=r.get("TIME", "—"), font=("Consolas", 10),
+                         text_color=("#8B75B0", "#6B5A8A"), width=72, anchor="w"
+                         ).pack(side="left", padx=4, pady=8)
+            ctk.CTkLabel(rc, text=r.get("MSISDN", "—"), font=("Consolas", 12, "bold"),
+                         text_color=("#EDE8F5", "#1A0A2E"), width=120, anchor="w"
+                         ).pack(side="left", padx=4, pady=8)
+            ctk.CTkLabel(rc, text=r.get("PLAN_TYPE", "—"), font=("Segoe UI", 11),
+                         text_color=("#8B75B0", "#6B5A8A"), width=88, anchor="w"
+                         ).pack(side="left", padx=4, pady=8)
+            tariff_display = TARIFF_RCODE_MAP.get(r.get("TARIFF", ""), r.get("TARIFF_TYPE", "—"))
+            ctk.CTkLabel(rc, text=tariff_display, font=("Segoe UI", 11),
+                         text_color=("#8B75B0", "#6B5A8A"), width=130, anchor="w"
+                         ).pack(side="left", padx=4, pady=8)
+            ctk.CTkLabel(rc,
+                         text="  ✅ PASSED  " if ok else "  ❌ FAILED  ",
+                         font=("Segoe UI", 10, "bold"),
+                         text_color=("#22C55E", "#16A34A") if ok else "#EF4444",
+                         fg_color=("#1C1030", "#FFFFFF"), corner_radius=6
+                         ).pack(side="left", padx=4, pady=8)
+            if r.get("ERROR"):
+                ctk.CTkLabel(rc, text=f"↳ {r['ERROR']}",
+                             font=("Consolas", 10),
+                             text_color=("#EF4444", "#DC2626"), anchor="w"
+                             ).pack(side="left", padx=8, pady=8, fill="x", expand=True)
 
     # ══════════════════════════════════════════════════
     #  HELPERS
@@ -710,7 +965,7 @@ class TabActivation:
         self._data_box.insert("end", "─" * 88 + "\n", "header")
         for i, d in enumerate(self._test_data, 1):
             tt = TARIFF_TYPE_RMAP.get(d["TARIFF_TYPE"], d["TARIFF_TYPE"])
-            tr = "Yeni Her Yere" if d.get("TARIFF", "") == "371" else d.get("TARIFF", "")
+            tr = TARIFF_RCODE_MAP.get(d.get("TARIFF", ""), d.get("TARIFF", ""))
             line = (f"{i:<3}  {d['MSISDN']:<12}  {d['SIMCARD']:<15}  "
                     f"{d['DOC_NUMBER']:<10}  {d['DOC_PIN']:<8}  "
                     f"{tr:<14}  {d['PLAN_TYPE']:<10}  {tt}\n")
@@ -740,9 +995,10 @@ class TabActivation:
         T   = self._T
         dlg = ctk.CTkToplevel(self._tab)
         dlg.title(T("add_dialog"))
-        dlg.geometry("480x560")
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
+        _center_on_parent(dlg, self._tab, w=500, h=600)
+        _style_dialog(dlg)
 
         dh = ctk.CTkFrame(dlg, fg_color=("#5C2483", "#5C2483"), corner_radius=0, height=52)
         dh.pack(fill="x")
@@ -760,7 +1016,7 @@ class TabActivation:
             ctk.CTkLabel(row, text=key, text_color=("#8B75B0", "#6B5A8A"),
                          font=FONT_LABEL, width=120, anchor="w").pack(side="left")
             if key == "MSISDN":
-                vcmd = (dlg.register(lambda s: len(s) <= 9), "%P")
+                vcmd = (dlg.register(lambda s: (s == "" or s.isdigit()) and len(s) <= 9), "%P")
                 e = ctk.CTkEntry(row, fg_color=("#251540", "#EDE8F5"), border_color=("#3D2260", "#C4B0DC"),
                                  text_color=("#EDE8F5", "#1A0A2E"), font=FONT_MONO_S, height=36,
                                  validate="key", validatecommand=vcmd)
@@ -770,7 +1026,6 @@ class TabActivation:
             e.pack(side="left", fill="x", expand=True)
             fields[key] = e
 
-        # SIMCARD — prefix 8999401 disabled + suffix max 6 chars
         sc_row = ctk.CTkFrame(frm, fg_color="transparent")
         sc_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(sc_row, text="SIMCARD", text_color=("#8B75B0", "#6B5A8A"),
@@ -782,7 +1037,7 @@ class TabActivation:
         prefix_lbl.insert(0, "8999401")
         prefix_lbl.configure(state="disabled")
         prefix_lbl.pack(side="left", padx=(0, 4))
-        sc_vcmd = (dlg.register(lambda s: len(s) <= 13), "%P")
+        sc_vcmd = (dlg.register(lambda s: (s == "" or s.isdigit()) and len(s) <= 13), "%P")
         sc_entry = ctk.CTkEntry(sc_row, fg_color=("#251540", "#EDE8F5"),
                                 border_color=("#3D2260", "#C4B0DC"),
                                 text_color=("#EDE8F5", "#1A0A2E"),
@@ -790,14 +1045,10 @@ class TabActivation:
                                 validate="key", validatecommand=sc_vcmd)
         sc_entry.pack(side="left", fill="x", expand=True)
 
-        # TARIFF dropdown
         TARIFF_CODE_MAP = {
-            "Yeni Her Yere":   "371",
-            "SuperSen 3GB":    "939",
-            "SuperSen 6GB":    "940",
-            "SuperSen 10GB":   "941",
-            "SuperSen 20GB":   "942",
-            "SuperSen 30GB":   "943",
+            "Yeni Her Yere": "371", "SuperSen 3GB":  "939",
+            "SuperSen 6GB":  "940", "SuperSen 10GB": "941",
+            "SuperSen 20GB": "942", "SuperSen 30GB": "943",
         }
         TARIFF_NAMES = list(TARIFF_CODE_MAP.keys())
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
@@ -810,8 +1061,7 @@ class TabActivation:
             font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
             button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
             dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
-            dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
-        )
+            dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260")
         tr_menu.pack(side="left", fill="x", expand=True)
 
         pt_row = ctk.CTkFrame(frm, fg_color="transparent")
@@ -855,13 +1105,7 @@ class TabActivation:
             row_data["SIMCARD"]       = "8999401" + sc_entry.get().strip()
             row_data["PLAN_TYPE"]     = pt_var.get()
             row_data["PLAN_TYPE_REG"] = pt_var.get()
-
-            # ✅ Prepaid olduqda TARIFF boş saxla
-            if pt_var.get() == "Prepaid":
-                row_data["TARIFF"] = ""
-            else:
-                row_data["TARIFF"] = TARIFF_CODE_MAP.get(tr_var.get(), "371")
-
+            row_data["TARIFF"]        = "" if pt_var.get() == "Prepaid" else TARIFF_CODE_MAP.get(tr_var.get(), "371")
             row_data["TARIFF_TYPE"]   = TARIFF_TYPE_MAP[tt_var.get()]
             if not row_data["MSISDN"] or not sc_entry.get().strip():
                 return
@@ -882,9 +1126,10 @@ class TabActivation:
         T   = self._T
         dlg = ctk.CTkToplevel(self._tab)
         dlg.title("✎  Edit Row")
-        dlg.geometry("480x560")
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
+        _center_on_parent(dlg, self._tab, w=500, h=600)
+        _style_dialog(dlg)
 
         dh = ctk.CTkFrame(dlg, fg_color="#B45309", corner_radius=0, height=52)
         dh.pack(fill="x")
@@ -902,7 +1147,7 @@ class TabActivation:
             ctk.CTkLabel(row, text=key, text_color=("#8B75B0", "#6B5A8A"),
                          font=FONT_LABEL, width=120, anchor="w").pack(side="left")
             if key == "MSISDN":
-                vcmd = (dlg.register(lambda s: len(s) <= 9), "%P")
+                vcmd = (dlg.register(lambda s: (s == "" or s.isdigit()) and len(s) <= 9), "%P")
                 e = ctk.CTkEntry(row, fg_color=("#251540", "#EDE8F5"), border_color=("#3D2260", "#C4B0DC"),
                                  text_color=("#EDE8F5", "#1A0A2E"), font=FONT_MONO_S, height=36,
                                  validate="key", validatecommand=vcmd)
@@ -913,7 +1158,6 @@ class TabActivation:
             e.insert(0, d.get(key, ""))
             fields[key] = e
 
-        # SIMCARD — prefix 8999401 disabled + suffix edit max 6 chars
         sc_row = ctk.CTkFrame(frm, fg_color="transparent")
         sc_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(sc_row, text="SIMCARD", text_color=("#8B75B0", "#6B5A8A"),
@@ -925,7 +1169,7 @@ class TabActivation:
         prefix_lbl.insert(0, "8999401")
         prefix_lbl.configure(state="disabled")
         prefix_lbl.pack(side="left", padx=(0, 4))
-        sc_vcmd = (dlg.register(lambda s: len(s) <= 13), "%P")
+        sc_vcmd = (dlg.register(lambda s: (s == "" or s.isdigit()) and len(s) <= 13), "%P")
         sc_entry = ctk.CTkEntry(sc_row, fg_color=("#251540", "#EDE8F5"),
                                 border_color=("#3D2260", "#C4B0DC"),
                                 text_color=("#EDE8F5", "#1A0A2E"),
@@ -933,36 +1177,27 @@ class TabActivation:
                                 validate="key", validatecommand=sc_vcmd)
         sc_entry.pack(side="left", fill="x", expand=True)
         existing_sc = d.get("SIMCARD", "")
-        if existing_sc.startswith("8999401"):
-            sc_entry.insert(0, existing_sc[7:])
-        else:
-            sc_entry.insert(0, existing_sc)
+        sc_entry.insert(0, existing_sc[7:] if existing_sc.startswith("8999401") else existing_sc)
 
-        # TARIFF dropdown
-        TARIFF_CODE_MAP  = {
-            "Yeni Her Yere": "371",
-            "SuperSen 3GB":  "939",
-            "SuperSen 6GB":  "940",
-            "SuperSen 10GB": "941",
-            "SuperSen 20GB": "942",
-            "SuperSen 30GB": "943",
+        TARIFF_CODE_MAP = {
+            "Yeni Her Yere": "371", "SuperSen 3GB":  "939",
+            "SuperSen 6GB":  "940", "SuperSen 10GB": "941",
+            "SuperSen 20GB": "942", "SuperSen 30GB": "943",
         }
-        TARIFF_RCODE_MAP = {v: k for k, v in TARIFF_CODE_MAP.items()}
-        TARIFF_NAMES = list(TARIFF_CODE_MAP.keys())
+        TARIFF_RCODE_MAP_LOCAL = {v: k for k, v in TARIFF_CODE_MAP.items()}
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
         tr_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        tr_var = ctk.StringVar(value=TARIFF_RCODE_MAP.get(d.get("TARIFF", "371"), "Yeni Her Yere"))
-        tr_menu = ctk.CTkOptionMenu(tr_row, values=TARIFF_NAMES, variable=tr_var,
+        tr_var = ctk.StringVar(value=TARIFF_RCODE_MAP_LOCAL.get(d.get("TARIFF", "371"), "Yeni Her Yere"))
+        tr_menu = ctk.CTkOptionMenu(tr_row, values=list(TARIFF_CODE_MAP.keys()), variable=tr_var,
                                     font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
                                     button_color=("#5C2483", "#5C2483"),
                                     button_hover_color=("#7C6EB0", "#7C6EB0"),
                                     dropdown_fg_color=("#1C1030", "#FFFFFF"),
                                     text_color=("#EDE8F5", "#1A0A2E"),
                                     dropdown_text_color="#EDE8F5",
-                                    dropdown_hover_color="#3D2260",
-                                    )
+                                    dropdown_hover_color="#3D2260")
         tr_menu.pack(side="left", fill="x", expand=True)
 
         pt_row = ctk.CTkFrame(frm, fg_color="transparent")
@@ -1006,12 +1241,7 @@ class TabActivation:
             row_data["SIMCARD"]       = sc_entry.get().strip()
             row_data["PLAN_TYPE"]     = pt_var.get()
             row_data["PLAN_TYPE_REG"] = pt_var.get()
-
-            if pt_var.get() == "Prepaid":
-                row_data["TARIFF"] = ""
-            else:
-                row_data["TARIFF"] = TARIFF_CODE_MAP.get(tr_var.get(), "371")
-
+            row_data["TARIFF"]        = "" if pt_var.get() == "Prepaid" else TARIFF_CODE_MAP.get(tr_var.get(), "371")
             row_data["TARIFF_TYPE"]   = TARIFF_TYPE_MAP[tt_var.get()]
             if not row_data["MSISDN"] or not sc_entry.get().strip():
                 return
