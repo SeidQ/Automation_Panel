@@ -782,7 +782,7 @@ class TabActivation:
         prefix_lbl.insert(0, "8999401")
         prefix_lbl.configure(state="disabled")
         prefix_lbl.pack(side="left", padx=(0, 4))
-        sc_vcmd = (dlg.register(lambda s: len(s) <= 6), "%P")
+        sc_vcmd = (dlg.register(lambda s: len(s) <= 13), "%P")
         sc_entry = ctk.CTkEntry(sc_row, fg_color=("#251540", "#EDE8F5"),
                                 border_color=("#3D2260", "#C4B0DC"),
                                 text_color=("#EDE8F5", "#1A0A2E"),
@@ -791,14 +791,22 @@ class TabActivation:
         sc_entry.pack(side="left", fill="x", expand=True)
 
         # TARIFF dropdown
-        TARIFF_CODE_MAP = {"Yeni Her Yere": "371"}
+        TARIFF_CODE_MAP = {
+            "Yeni Her Yere":   "371",
+            "SuperSen 3GB":    "939",
+            "SuperSen 6GB":    "940",
+            "SuperSen 10GB":   "941",
+            "SuperSen 20GB":   "942",
+            "SuperSen 30GB":   "943",
+        }
+        TARIFF_NAMES = list(TARIFF_CODE_MAP.keys())
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
         tr_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
         tr_var = ctk.StringVar(value="Yeni Her Yere")
         tr_menu = ctk.CTkOptionMenu(
-            tr_row, values=["Yeni Her Yere"], variable=tr_var,
+            tr_row, values=TARIFF_NAMES, variable=tr_var,
             font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
             button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
             dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
@@ -931,14 +939,22 @@ class TabActivation:
             sc_entry.insert(0, existing_sc)
 
         # TARIFF dropdown
-        TARIFF_CODE_MAP  = {"Yeni Her Yere": "371"}
-        TARIFF_RCODE_MAP = {"371": "Yeni Her Yere"}
+        TARIFF_CODE_MAP  = {
+            "Yeni Her Yere": "371",
+            "SuperSen 3GB":  "939",
+            "SuperSen 6GB":  "940",
+            "SuperSen 10GB": "941",
+            "SuperSen 20GB": "942",
+            "SuperSen 30GB": "943",
+        }
+        TARIFF_RCODE_MAP = {v: k for k, v in TARIFF_CODE_MAP.items()}
+        TARIFF_NAMES = list(TARIFF_CODE_MAP.keys())
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
         tr_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
         tr_var = ctk.StringVar(value=TARIFF_RCODE_MAP.get(d.get("TARIFF", "371"), "Yeni Her Yere"))
-        tr_menu = ctk.CTkOptionMenu(tr_row, values=["Yeni Her Yere"], variable=tr_var,
+        tr_menu = ctk.CTkOptionMenu(tr_row, values=TARIFF_NAMES, variable=tr_var,
                                     font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
                                     button_color=("#5C2483", "#5C2483"),
                                     button_hover_color=("#7C6EB0", "#7C6EB0"),

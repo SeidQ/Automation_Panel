@@ -8,13 +8,13 @@
     "mode": "parallel",
     "test_data": [
       {
-        "MSISDN": "102989146",
+        "MSISDN": "102989141",
         "DOC_NUMBER": "AA0877974",
         "DOC_PIN": "70HF8GF",
-        "SIMCARD": "2411010161753",
+        "SIMCARD": "2411010161316",
         "PLAN_TYPE": "PostPaid",
         "PLAN_TYPE_REG": "PostPaid",
-        "TARIFF": "371",
+        "TARIFF": "940",
         "TARIFF_TYPE": "flat"
       }
     ]

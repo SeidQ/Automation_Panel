@@ -133,6 +133,9 @@ STRINGS = {
         "msisdn_error":    "Request failed",
         "msisdn_empty":    "Enter a number and press Search",
         "designed_by":     "Designed by Said",
+        "val_not_selected": "not selected — please fill in.",
+        "val_not_found":    "file not found:",
+        "val_error_status": "Error",
     },
     "az": {
         "tab_planning":    "  📋 Nömrə Planlanması  ",
@@ -181,6 +184,9 @@ STRINGS = {
         "msisdn_error":    "Sorğu uğursuz oldu",
         "msisdn_empty":    "Nömrə daxil edib Axtar düyməsini basın",
         "designed_by":     "Designed by Said",
+        "val_not_selected": "seçilməyib — zəhmət olmasa doldurun.",
+        "val_not_found":    "fayl tapılmadı:",
+        "val_error_status": "Xəta",
     },
     "ru": {
         "tab_planning":    "  📋 Планирование  ",
@@ -229,6 +235,9 @@ STRINGS = {
         "msisdn_error":    "Запрос не выполнен",
         "msisdn_empty":    "Введите номер и нажмите Поиск",
         "designed_by":     "Designed by Said",
+        "val_not_selected": "не выбран — пожалуйста, заполните.",
+        "val_not_found":    "файл не найден:",
+        "val_error_status": "Ошибка",
     },
 }
 

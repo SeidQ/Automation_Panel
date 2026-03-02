@@ -336,14 +336,8 @@ class TabPlanning:
     def _on_start(self):
         if self._running:
             return
-        self._running = True
-        self._stop_ev.clear()
-        self._start_btn.configure(state="disabled")
-        self._cancel_btn.configure(state="normal")
-        self._set_status(self._T("running"), C["warning"], "#2A1A05")
-        self._append_log(datetime.now().strftime("%H:%M:%S"),
-                         self._T("np_started"), "warning")
 
+        # ── Validation ────────────────────────────────
         cfg = {
             "chromedriver": "",
             "username":     self._np_user.get().strip(),
@@ -352,6 +346,45 @@ class TabPlanning:
             "update_file":  self._np_update_file.get().strip(),
             "assign_file":  self._np_assign_file.get().strip(),
         }
+
+        missing = []
+        if not cfg["username"]:
+            missing.append("Username")
+        if not cfg["password"]:
+            missing.append("Password")
+        if not cfg["plan_file"]:
+            missing.append("Planning File")
+        if not cfg["update_file"]:
+            missing.append("Update File")
+        if not cfg["assign_file"]:
+            missing.append("Assign File")
+
+        if missing:
+            ts = datetime.now().strftime("%H:%M:%S")
+            for field in missing:
+                self._append_log(ts, f"⚠ '{field}' {self._T('val_not_selected')}", "error")
+            self._set_status(self._T("val_error_status"), C["error"], "#2A0A0A")
+            return
+
+        # Check that file paths actually exist on disk
+        for key, label in [("plan_file", "Planning File"),
+                            ("update_file", "Update File"),
+                            ("assign_file", "Assign File")]:
+            path = cfg[key]
+            if not os.path.isfile(path):
+                self._append_log(
+                    datetime.now().strftime("%H:%M:%S"),
+                    f"⚠ '{label}' {self._T('val_not_found')} {path}", "error")
+                self._set_status(self._T("val_error_status"), C["error"], "#2A0A0A")
+                return
+
+        self._running = True
+        self._stop_ev.clear()
+        self._start_btn.configure(state="disabled")
+        self._cancel_btn.configure(state="normal")
+        self._set_status(self._T("running"), C["warning"], "#2A1A05")
+        self._append_log(datetime.now().strftime("%H:%M:%S"),
+                         self._T("np_started"), "warning")
 
         def worker():
             try:

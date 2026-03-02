@@ -25,7 +25,7 @@ from tab_msisdn      import TabMSISDN
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Azercel Automation Panel")
+        self.title("Azercell Automation Panel")
         self.geometry("1380x880")
         self.minsize(1100, 720)
         self.configure(fg_color=("#120A1E", "#F3F0F8"))
