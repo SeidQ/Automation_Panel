@@ -23,8 +23,18 @@
   "planning": {
     "username": "ccequlamova",
     "password": "Yltak_141012#",
-    "plan_file": "",
-    "update_file": "",
-    "assign_file": ""
+    "planning_data": [
+      {
+        "MSISDN": "102989142",
+        "SIMCARD": "89994012411010160888",
+        "PLAN_TYPE": "PostPaid",
+        "USAGE": "VOICE",
+        "SEGMENT": "2",
+        "PRICE": "",
+        "PUBLIC": "0",
+        "NUMBER_TYPE": "EXTERNAL",
+        "DESCRIPTION": ""
+      }
+    ]
   }
 }
