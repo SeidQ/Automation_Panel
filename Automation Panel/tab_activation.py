@@ -48,9 +48,10 @@ def _style_dialog(dlg):
 # ══════════════════════════════════════════════════════
 #  PIPELINE STEPS
 # ══════════════════════════════════════════════════════
-STEPS = ["Login", "Check MHM", "Register"]
+STEPS_POSTPAID = ["Login", "Check MHM", "Register"]
+STEPS_PREPAID  = ["Login", "Check MHM", "Register"]
 
-# Tariff display names
+# PostPaid tariff display names
 TARIFF_RCODE_MAP = {
     "371": "Yeni Her Yere",
     "939": "SuperSen 3GB",
@@ -59,6 +60,51 @@ TARIFF_RCODE_MAP = {
     "942": "SuperSen 20GB",
     "943": "SuperSen 30GB",
 }
+
+# Prepaid tariff codes -> display names
+PREPAID_TARIFF_MAP = {
+    "1091": "DigiMax Daily",
+    "1098": "DigiMax Weekly",
+    "1105": "DigiMax 3GB",
+    "1112": "DigiMax 5GB",
+    "1118": "DigiMax 10GB",
+    "1129": "DigiMax 25GB",
+    "935":  "Travel Pack 30GB",
+    "1132": "Premium+ 60GB",
+    "1194": "Premium+ 100GB",
+}
+PREPAID_TARIFF_RMAP = {v: k for k, v in PREPAID_TARIFF_MAP.items()}
+
+# ══════════════════════════════════════════════════════
+#  ERROR MESSAGE CLEANER
+# ══════════════════════════════════════════════════════
+def _clean_error(msg: str) -> str:
+    """
+    Strip internal prefixes and HTTP/null boilerplate so only the
+    human-readable part is shown in the UI.
+
+    Examples:
+      "checkMHM: Simkart tapilmadi"          -> "Simkart tapilmadi"
+      "registerCustomer failed [500]: ..."   -> meaningful part only
+      "addVoucher: Voucher not found 500 null" -> "Voucher not found"
+    """
+    # Remove known function-level prefixes
+    for prefix in ("checkMHM: ", "registerCustomer failed ", "addVoucher: "):
+        if msg.startswith(prefix):
+            msg = msg[len(prefix):]
+
+    # Strip leading HTTP bracket codes like "[500]: " or "500: "
+    msg = re.sub(r"^\[?\d{3}\]?\s*[:\-]\s*", "", msg).strip()
+
+    # Strip trailing noise tokens: " 500", " null", " error", " Error", " None"
+    msg = re.sub(r"(\s+(500|null|None|error|Error))+\s*$", "", msg).strip()
+
+    # If nothing useful remains, give a generic message
+    if not msg or re.fullmatch(r"\d{3}", msg):
+        msg = "Unexpected server error"
+
+    return msg
+
 
 # ══════════════════════════════════════════════════════
 #  API HELPERS
@@ -119,6 +165,46 @@ def check_mhm(session, base_url, data):
     return j
 
 
+def add_voucher(session, base_url, voucher, msisdn, simcard):
+    r = session.get(
+        f"{base_url}/customer/checkMHMAddVoucher",
+        params={"voucher": voucher, "msisdn": msisdn, "serial": simcard},
+        headers={"Accept":  "application/json, text/javascript, */*; q=0.01",
+                 "Referer": f"{base_url}/customer",
+                 "X-KL-Ajax-Request": "Ajax_Request"})
+
+    # 404 → voucher does not exist in the system
+    if r.status_code == 404:
+        raise Exception("addVoucher: Vauçer sistemdə tapılmadı")
+
+    body = r.text.strip()
+    if not body or body.startswith("<!"):
+        raise Exception("addVoucher: session invalid")
+
+    # Parse JSON safely — malformed body should surface cleanly
+    try:
+        j = r.json()
+    except Exception:
+        raise Exception("addVoucher: Server returned an invalid response")
+
+    if isinstance(j, dict):
+        # Check every common error field the API might use
+        err = (j.get("errorMessage") or j.get("message") or
+               j.get("error") or j.get("description") or j.get("detail"))
+
+        # Ignore null / empty / literal "null" string values
+        if err and str(err).strip().lower() not in ("", "null", "none"):
+            raise Exception(f"addVoucher: {err}")
+
+        # Explicit failure flags even when no message is set
+        if j.get("success") is False or j.get("status") == "error":
+            fallback = (j.get("description") or j.get("detail") or
+                        "Vauçer sistemdə tapılmadı")
+            raise Exception(f"addVoucher: {fallback}")
+
+    return j
+
+
 def register_customer(session, base_url, data, consts):
     r = session.get(
         f"{base_url}/customer/registerCustomer",
@@ -142,13 +228,33 @@ def register_customer(session, base_url, data, consts):
                 "shouldBlockAds": "false", "shouldRefuseVHF": "false",
                 "street": "", "segmentType": ""},
         headers={"Accept": "application/json", "Referer": f"{base_url}/customer"})
+
+    # Parse JSON safely
+    try:
+        j = r.json()
+    except Exception:
+        j = None
+
+    # Extract clean error message from JSON body
+    if isinstance(j, dict):
+        err = (j.get("errorMessage") or j.get("message") or
+               j.get("error") or j.get("description") or j.get("detail"))
+        if err and str(err).strip().lower() not in ("", "null", "none"):
+            err_clean = str(err).strip().split(".")[0].strip()
+            raise Exception(f"registerCustomer failed: {err_clean}")
+        if j.get("success") is False or j.get("status") == "error":
+            raise Exception("registerCustomer failed: Qeydiyyat zamanı xəta baş verdi")
+
     if r.status_code != 200:
-        raise Exception(f"registerCustomer failed [{r.status_code}]: {r.text}")
-    return r.json()
+        raise Exception("registerCustomer failed: Server xətası")
+
+    return j
 
 
 def run_single(data, base_url, username, password, consts, log_q, result_q, stop_ev):
     msisdn       = data["MSISDN"]
+    is_prepaid   = data.get("PLAN_TYPE", "").lower() == "prepaid"
+    STEPS        = STEPS_PREPAID if is_prepaid else STEPS_POSTPAID
     tariff_label = TARIFF_TYPE_RMAP.get(data["TARIFF_TYPE"], data["TARIFF_TYPE"])
 
     def log(step_idx, msg, level="info", done=False, error=False):
@@ -161,6 +267,7 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
             "total":  len(STEPS),
             "done":   done,
             "error":  error,
+            "steps":  STEPS,
         })
 
     try:
@@ -172,9 +279,17 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
         session = create_session(base_url, username, password)
         log(0, "Session created", "success")
 
-        # Step 1 — Check MHM
+        # Step 1 — Check MHM  (+  voucher check for Prepaid)
         log(1, "Validating document & MHM check...")
         check_mhm(session, base_url, data)
+
+        if is_prepaid:
+            voucher = data.get("VOUCHER", "").strip()
+            if not voucher:
+                raise Exception("checkMHM: Prepaid aktivasiya üçün vauçer tələb olunur")
+            add_voucher(session, base_url, voucher, data["MSISDN"], data["SIMCARD"])
+            # success → silent, just continue to Register
+
         log(1, "MHM check passed", "success")
 
         # Step 2 — Register
@@ -187,12 +302,21 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
                       "TARIFF_TYPE": tariff_label, "STATUS": "PASSED", "ERROR": ""})
 
     except Exception as e:
-        step_idx = 0
-        msg = str(e).replace("checkMHM: ", "").replace("registerCustomer failed ", "")
-        if "checkMHM" in str(e) or "MHM" in str(e):
-            step_idx = 1
-        elif "registerCustomer" in str(e):
+        raw = str(e)
+
+        # Determine which step raised the error — order matters: most specific first
+        if "registerCustomer" in raw:
             step_idx = 2
+        elif "checkMHM" in raw or "addVoucher" in raw:
+            step_idx = 1
+        elif "SESSION" in raw or "session invalid" in raw.lower() or "Login failed" in raw:
+            step_idx = 0
+        else:
+            step_idx = 0
+
+        # Clean the raw exception message before sending to the UI
+        msg = _clean_error(raw)
+
         log(step_idx, msg, "error", done=True, error=True)
         result_q.put({"MSISDN": msisdn, "PLAN_TYPE": data["PLAN_TYPE"],
                       "TARIFF": data.get("TARIFF", ""),
@@ -203,17 +327,18 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
 #  MSISDN CARD — live step tracker widget
 # ══════════════════════════════════════════════════════
 class MsisdnCard:
-    STEP_ICONS = ["🔐", "🔍", "📝"]
+    STEP_ICONS = ["🔐", "🔍", "📝", "🎟️"]
 
-    def __init__(self, parent, msisdn, plan_type, tariff_type, index):
+    def __init__(self, parent, msisdn, plan_type, tariff_type, index, steps=None):
         self.msisdn = msisdn
+        self._steps = steps or STEPS_POSTPAID
 
         self._frame = ctk.CTkFrame(parent, fg_color=("#251540", "#EDE8F5"),
                                    corner_radius=12, border_width=1,
                                    border_color=("#3D2260", "#C4B0DC"))
         self._frame.pack(fill="x", padx=6, pady=(0, 8))
 
-        # ── Header ────────────────────────────────────
+        # Header
         hdr = ctk.CTkFrame(self._frame, fg_color="transparent")
         hdr.pack(fill="x", padx=12, pady=(10, 6))
 
@@ -245,16 +370,17 @@ class MsisdnCard:
                                    fg_color=("#1C1030", "#FFFFFF"), corner_radius=6)
         self._badge.pack(side="right", padx=(0, 8))
 
-        # ── Step progress ─────────────────────────────
+        # Step progress
         steps_row = ctk.CTkFrame(self._frame, fg_color="transparent")
         steps_row.pack(fill="x", padx=14, pady=(0, 4))
 
         self._step_widgets = []
-        for i, name in enumerate(STEPS):
+        for i, name in enumerate(self._steps):
             sf = ctk.CTkFrame(steps_row, fg_color="transparent")
             sf.pack(side="left")
 
-            icon = ctk.CTkLabel(sf, text=self.STEP_ICONS[i],
+            icon_char = self.STEP_ICONS[i] if i < len(self.STEP_ICONS) else "▸"
+            icon = ctk.CTkLabel(sf, text=icon_char,
                                 font=("Segoe UI", 12),
                                 text_color=("#8B75B0", "#6B5A8A"))
             icon.pack(side="left", padx=(0, 2))
@@ -264,14 +390,14 @@ class MsisdnCard:
                                text_color=("#8B75B0", "#6B5A8A"))
             lbl.pack(side="left")
 
-            if i < len(STEPS) - 1:
+            if i < len(self._steps) - 1:
                 ctk.CTkLabel(sf, text="  →  ",
                              font=("Segoe UI", 10),
                              text_color=("#3D2260", "#C4B0DC")).pack(side="left")
 
-            self._step_widgets.append((icon, lbl))
+            self._step_widgets.append((icon, lbl, icon_char))
 
-        # ── Detail line ───────────────────────────────
+        # Detail line
         self._detail = ctk.CTkLabel(self._frame, text="",
                                     font=("Consolas", 14),
                                     text_color=("#8B75B0", "#6B5A8A"),
@@ -279,7 +405,7 @@ class MsisdnCard:
         self._detail.pack(fill="x", padx=14, pady=(0, 10))
 
     def update_step(self, step_idx, msg, level, done=False, error=False):
-        for i, (icon, lbl) in enumerate(self._step_widgets):
+        for i, (icon, lbl, icon_char) in enumerate(self._step_widgets):
             if i < step_idx:
                 icon.configure(text="✓", text_color=("#22C55E", "#16A34A"))
                 lbl.configure(text_color=("#22C55E", "#16A34A"))
@@ -291,10 +417,10 @@ class MsisdnCard:
                     icon.configure(text="✓",  text_color=("#22C55E", "#16A34A"))
                     lbl.configure(text_color=("#22C55E", "#16A34A"))
                 else:
-                    icon.configure(text=self.STEP_ICONS[i], text_color=("#F59E0B", "#D97706"))
+                    icon.configure(text=icon_char, text_color=("#F59E0B", "#D97706"))
                     lbl.configure(text_color=("#F59E0B", "#D97706"))
             else:
-                icon.configure(text=self.STEP_ICONS[i], text_color=("#8B75B0", "#6B5A8A"))
+                icon.configure(text=icon_char, text_color=("#8B75B0", "#6B5A8A"))
                 lbl.configure(text_color=("#8B75B0", "#6B5A8A"))
 
         color_map = {"success": C["success"], "error": C["error"],
@@ -345,7 +471,7 @@ class TabActivation:
         tab.columnconfigure(1, weight=5)
         tab.rowconfigure(0, weight=1)
 
-        # ── Left config panel ─────────────────────────
+        # Left config panel
         left = ctk.CTkScrollableFrame(
             tab, fg_color=("#1C1030", "#FFFFFF"), corner_radius=14,
             scrollbar_button_color=("#3D2260", "#C4B0DC"),
@@ -413,7 +539,7 @@ class TabActivation:
             command=self.clear_log
         ).pack(fill="x")
 
-        # ── Right panel ───────────────────────────────
+        # Right panel
         right = ctk.CTkFrame(tab, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew")
         right.rowconfigure(1, weight=2)
@@ -630,8 +756,9 @@ class TabActivation:
         data_list = deepcopy(self._test_data)
 
         for i, d in enumerate(data_list, 1):
-            tt   = TARIFF_TYPE_RMAP.get(d["TARIFF_TYPE"], d["TARIFF_TYPE"])
-            card = MsisdnCard(self._console, d["MSISDN"], d["PLAN_TYPE"], tt, i)
+            tt    = TARIFF_TYPE_RMAP.get(d["TARIFF_TYPE"], d["TARIFF_TYPE"])
+            steps = STEPS_PREPAID if d.get("PLAN_TYPE", "").lower() == "prepaid" else STEPS_POSTPAID
+            card  = MsisdnCard(self._console, d["MSISDN"], d["PLAN_TYPE"], tt, i, steps=steps)
             self._cards[d["MSISDN"]] = card
 
         def worker():
@@ -721,12 +848,11 @@ class TabActivation:
         self._show_placeholder()
 
     # ══════════════════════════════════════════════════
-    #  HISTORY WINDOW  (called from App._open_history)
+    #  HISTORY WINDOW
     # ══════════════════════════════════════════════════
     def build_history_tab(self, parent):
         T = self._T
 
-        # ── Filter card ───────────────────────────────
         fc = ctk.CTkFrame(parent, fg_color=("#1C1030", "#FFFFFF"),
                           corner_radius=14, border_width=1,
                           border_color=("#3D2260", "#C4B0DC"))
@@ -739,7 +865,6 @@ class TabActivation:
                      ).grid(row=0, column=0, columnspan=3,
                             sticky="w", padx=16, pady=(10, 4))
 
-        # ── Column 0: MSISDN search ───────────────────
         col0 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col0.grid(row=1, column=0, sticky="nsew", padx=(12, 5), pady=(0, 12))
         ctk.CTkLabel(col0, text="📱  MSISDN",
@@ -759,7 +884,6 @@ class TabActivation:
         ).pack(fill="x", padx=12, pady=(0, 10))
         self._hist_msisdn_var.trace_add("write", lambda *_: self._hist_refresh())
 
-        # ── Column 1: Tariff dropdown ─────────────────
         col1 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col1.grid(row=1, column=1, sticky="nsew", padx=5, pady=(0, 12))
         ctk.CTkLabel(col1, text="📋  TARIFF",
@@ -783,11 +907,9 @@ class TabActivation:
             command=lambda _: self._hist_refresh()
         ).pack(fill="x", padx=12, pady=(0, 10))
 
-        # ── Column 2: Plan + Status chips ────────────
         col2 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col2.grid(row=1, column=2, sticky="nsew", padx=(5, 12), pady=(0, 12))
 
-        # Plan chips
         ctk.CTkLabel(col2, text="💳  PLAN TYPE",
                      font=("Segoe UI", 10, "bold"),
                      text_color=("#8B75B0", "#6B5A8A")
@@ -808,7 +930,6 @@ class TabActivation:
             b.grid(row=0, column=col_idx, padx=(0, 3) if col_idx < 2 else 0, sticky="ew")
             self._plan_btns[val] = b
 
-        # ── Stats bar ─────────────────────────────────
         self._hist_stats_bar = ctk.CTkFrame(parent, fg_color=("#1C1030", "#FFFFFF"),
                                             corner_radius=10, height=36)
         self._hist_stats_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
@@ -818,7 +939,6 @@ class TabActivation:
             font=("Segoe UI", 11), text_color=("#8B75B0", "#6B5A8A"))
         self._hist_stats_lbl.pack(side="left", padx=14)
 
-        # ── Column headers ────────────────────────────
         col_hdr = ctk.CTkFrame(parent, fg_color=("#251540", "#EDE8F5"),
                                corner_radius=8, height=34)
         col_hdr.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 4))
@@ -835,7 +955,6 @@ class TabActivation:
                                 fill="x" if not w else None,
                                 expand=(not w))
 
-        # ── Scrollable rows ───────────────────────────
         self._hist_scroll = ctk.CTkScrollableFrame(
             parent, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12,
             border_width=1, border_color=("#3D2260", "#C4B0DC"),
@@ -846,7 +965,6 @@ class TabActivation:
 
         self._hist_refresh()
 
-    # ── Chip state helpers ────────────────────────────
     def _set_plan_chip(self, val):
         self._hist_plan_var.set(val)
         for v, btn in self._plan_btns.items():
@@ -860,7 +978,6 @@ class TabActivation:
             btn.configure(fg_color=self._status_colors[v] if active else "#2A1A2A")
         self._hist_refresh()
 
-    # ── Refresh list ──────────────────────────────────
     def _hist_refresh(self):
         if not hasattr(self, "_hist_scroll"):
             return
@@ -960,15 +1077,19 @@ class TabActivation:
         self._data_box.tag_config("header",   foreground=C["muted"])
         self._data_box.tag_config("selected", background="#3D1A6B")
         hdr = (f"{'#':<3}  {'MSISDN':<12}  {'SIMCARD':<15}  "
-               f"{'DOC_NO':<10}  {'PIN':<8}  {'TARIFF':<14}  {'PLAN':<10}  {'TYPE'}\n")
+               f"{'DOC_NO':<10}  {'PIN':<8}  {'TARIFF':<18}  {'PLAN':<10}  {'TYPE':<12}  {'VOUCHER'}\n")
         self._data_box.insert("end", hdr, "header")
-        self._data_box.insert("end", "─" * 88 + "\n", "header")
+        self._data_box.insert("end", "─" * 108 + "\n", "header")
         for i, d in enumerate(self._test_data, 1):
             tt = TARIFF_TYPE_RMAP.get(d["TARIFF_TYPE"], d["TARIFF_TYPE"])
-            tr = TARIFF_RCODE_MAP.get(d.get("TARIFF", ""), d.get("TARIFF", ""))
+            if d.get("PLAN_TYPE", "").lower() == "prepaid":
+                tr = PREPAID_TARIFF_MAP.get(d.get("TARIFF", ""), d.get("TARIFF", "—"))
+            else:
+                tr = TARIFF_RCODE_MAP.get(d.get("TARIFF", ""), d.get("TARIFF", ""))
+            voucher = d.get("VOUCHER", "")
             line = (f"{i:<3}  {d['MSISDN']:<12}  {d['SIMCARD']:<15}  "
                     f"{d['DOC_NUMBER']:<10}  {d['DOC_PIN']:<8}  "
-                    f"{tr:<14}  {d['PLAN_TYPE']:<10}  {tt}\n")
+                    f"{tr:<18}  {d['PLAN_TYPE']:<10}  {tt:<12}  {voucher}\n")
             self._data_box.insert("end", line,
                                   "selected" if self._sel_row == i - 1 else "")
         self._data_box.configure(state="disabled")
@@ -997,7 +1118,7 @@ class TabActivation:
         dlg.title(T("add_dialog"))
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
-        _center_on_parent(dlg, self._tab, w=500, h=600)
+        _center_on_parent(dlg, self._tab, w=500, h=660)
         _style_dialog(dlg)
 
         dh = ctk.CTkFrame(dlg, fg_color=("#5C2483", "#5C2483"), corner_radius=0, height=52)
@@ -1045,25 +1166,6 @@ class TabActivation:
                                 validate="key", validatecommand=sc_vcmd)
         sc_entry.pack(side="left", fill="x", expand=True)
 
-        TARIFF_CODE_MAP = {
-            "Yeni Her Yere": "371", "SuperSen 3GB":  "939",
-            "SuperSen 6GB":  "940", "SuperSen 10GB": "941",
-            "SuperSen 20GB": "942", "SuperSen 30GB": "943",
-        }
-        TARIFF_NAMES = list(TARIFF_CODE_MAP.keys())
-        tr_row = ctk.CTkFrame(frm, fg_color="transparent")
-        tr_row.pack(fill="x", padx=12, pady=5)
-        ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
-                     font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        tr_var = ctk.StringVar(value="Yeni Her Yere")
-        tr_menu = ctk.CTkOptionMenu(
-            tr_row, values=TARIFF_NAMES, variable=tr_var,
-            font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
-            button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
-            dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
-            dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260")
-        tr_menu.pack(side="left", fill="x", expand=True)
-
         pt_row = ctk.CTkFrame(frm, fg_color="transparent")
         pt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(pt_row, text="PLAN_TYPE", text_color=("#8B75B0", "#6B5A8A"),
@@ -1074,19 +1176,28 @@ class TabActivation:
                           button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
                           dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
                           dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
+                          command=lambda _: _sync_plan()
                           ).pack(side="left", fill="x", expand=True)
 
-        def _sync_tariff_by_plan(*_):
-            if pt_var.get() == "Prepaid":
-                tr_var.set("")
-                tr_menu.configure(state="disabled")
-            else:
-                if not tr_var.get().strip():
-                    tr_var.set("Yeni Her Yere")
-                tr_menu.configure(state="normal")
+        POSTPAID_CODE_MAP = {
+            "Yeni Her Yere": "371", "SuperSen 3GB":  "939",
+            "SuperSen 6GB":  "940", "SuperSen 10GB": "941",
+            "SuperSen 20GB": "942", "SuperSen 30GB": "943",
+        }
+        PREPAID_CODE_MAP_LOCAL = {v: k for k, v in PREPAID_TARIFF_MAP.items()}
 
-        pt_var.trace_add("write", _sync_tariff_by_plan)
-        _sync_tariff_by_plan()
+        tr_row = ctk.CTkFrame(frm, fg_color="transparent")
+        tr_row.pack(fill="x", padx=12, pady=5)
+        ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
+                     font=FONT_LABEL, width=120, anchor="w").pack(side="left")
+        tr_var = ctk.StringVar(value="Yeni Her Yere")
+        tr_menu = ctk.CTkOptionMenu(
+            tr_row, values=list(POSTPAID_CODE_MAP.keys()), variable=tr_var,
+            font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
+            button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
+            dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
+            dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260")
+        tr_menu.pack(side="left", fill="x", expand=True)
 
         tt_row = ctk.CTkFrame(frm, fg_color="transparent")
         tt_row.pack(fill="x", padx=12, pady=5)
@@ -1100,13 +1211,43 @@ class TabActivation:
                           dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
                           ).pack(side="left", fill="x", expand=True)
 
+        vc_row = ctk.CTkFrame(frm, fg_color="transparent")
+        ctk.CTkLabel(vc_row, text="VOUCHER 🎟️", text_color=("#8B75B0", "#6B5A8A"),
+                     font=FONT_LABEL, width=120, anchor="w").pack(side="left")
+        vc_vcmd = (dlg.register(lambda s: (s == "" or s.isdigit()) and len(s) <= 13), "%P")
+        vc_entry = ctk.CTkEntry(vc_row, fg_color=("#251540", "#EDE8F5"),
+                                border_color=("#5C2483", "#5C2483"),
+                                text_color=("#EDE8F5", "#1A0A2E"),
+                                placeholder_text="13-digit voucher code",
+                                placeholder_text_color=("#8B75B0", "#6B5A8A"),
+                                font=FONT_MONO_S, height=36,
+                                validate="key", validatecommand=vc_vcmd)
+        vc_entry.pack(side="left", fill="x", expand=True)
+
+        def _sync_plan(*_):
+            if pt_var.get() == "Prepaid":
+                tr_menu.configure(values=list(PREPAID_CODE_MAP_LOCAL.keys()))
+                tr_var.set(list(PREPAID_CODE_MAP_LOCAL.keys())[0])
+                vc_row.pack(fill="x", padx=12, pady=5)
+            else:
+                tr_menu.configure(values=list(POSTPAID_CODE_MAP.keys()))
+                tr_var.set("Yeni Her Yere")
+                vc_row.pack_forget()
+
+        _sync_plan()
+
         def save():
             row_data = {k: v.get().strip() for k, v in fields.items()}
-            row_data["SIMCARD"]       = "8999401" + sc_entry.get().strip()
+            row_data["SIMCARD"]       = sc_entry.get().strip()
             row_data["PLAN_TYPE"]     = pt_var.get()
             row_data["PLAN_TYPE_REG"] = pt_var.get()
-            row_data["TARIFF"]        = "" if pt_var.get() == "Prepaid" else TARIFF_CODE_MAP.get(tr_var.get(), "371")
-            row_data["TARIFF_TYPE"]   = TARIFF_TYPE_MAP[tt_var.get()]
+            if pt_var.get() == "Prepaid":
+                row_data["TARIFF"]  = PREPAID_CODE_MAP_LOCAL.get(tr_var.get(), "1091")
+                row_data["VOUCHER"] = vc_entry.get().strip()
+            else:
+                row_data["TARIFF"]  = POSTPAID_CODE_MAP.get(tr_var.get(), "371")
+                row_data["VOUCHER"] = ""
+            row_data["TARIFF_TYPE"] = TARIFF_TYPE_MAP[tt_var.get()]
             if not row_data["MSISDN"] or not sc_entry.get().strip():
                 return
             self._test_data.append(row_data)
@@ -1179,18 +1320,27 @@ class TabActivation:
         existing_sc = d.get("SIMCARD", "")
         sc_entry.insert(0, existing_sc[7:] if existing_sc.startswith("8999401") else existing_sc)
 
-        TARIFF_CODE_MAP = {
+        POSTPAID_CODE_MAP_E = {
             "Yeni Her Yere": "371", "SuperSen 3GB":  "939",
             "SuperSen 6GB":  "940", "SuperSen 10GB": "941",
             "SuperSen 20GB": "942", "SuperSen 30GB": "943",
         }
-        TARIFF_RCODE_MAP_LOCAL = {v: k for k, v in TARIFF_CODE_MAP.items()}
+        PREPAID_CODE_MAP_E = {v: k for k, v in PREPAID_TARIFF_MAP.items()}
+        is_prepaid_now = d.get("PLAN_TYPE", "PostPaid") == "Prepaid"
+
+        if is_prepaid_now:
+            init_tr = PREPAID_TARIFF_MAP.get(d.get("TARIFF", ""), list(PREPAID_CODE_MAP_E.keys())[0])
+        else:
+            pp_rmap = {v: k for k, v in POSTPAID_CODE_MAP_E.items()}
+            init_tr = pp_rmap.get(d.get("TARIFF", "371"), "Yeni Her Yere")
+
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
         tr_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        tr_var = ctk.StringVar(value=TARIFF_RCODE_MAP_LOCAL.get(d.get("TARIFF", "371"), "Yeni Her Yere"))
-        tr_menu = ctk.CTkOptionMenu(tr_row, values=list(TARIFF_CODE_MAP.keys()), variable=tr_var,
+        tr_var = ctk.StringVar(value=init_tr)
+        init_vals = list(PREPAID_CODE_MAP_E.keys()) if is_prepaid_now else list(POSTPAID_CODE_MAP_E.keys())
+        tr_menu = ctk.CTkOptionMenu(tr_row, values=init_vals, variable=tr_var,
                                     font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
                                     button_color=("#5C2483", "#5C2483"),
                                     button_hover_color=("#7C6EB0", "#7C6EB0"),
@@ -1210,19 +1360,8 @@ class TabActivation:
                           button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
                           dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
                           dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
+                          command=lambda _: _sync_plan_e()
                           ).pack(side="left", fill="x", expand=True)
-
-        def _sync_tariff_by_plan(*_):
-            if pt_var.get() == "Prepaid":
-                tr_var.set("")
-                tr_menu.configure(state="disabled")
-            else:
-                if not tr_var.get().strip():
-                    tr_var.set("Yeni Her Yere")
-                tr_menu.configure(state="normal")
-
-        pt_var.trace_add("write", _sync_tariff_by_plan)
-        _sync_tariff_by_plan()
 
         tt_row = ctk.CTkFrame(frm, fg_color="transparent")
         tt_row.pack(fill="x", padx=12, pady=5)
@@ -1236,13 +1375,45 @@ class TabActivation:
                           dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
                           ).pack(side="left", fill="x", expand=True)
 
+        vc_row_e = ctk.CTkFrame(frm, fg_color="transparent")
+        ctk.CTkLabel(vc_row_e, text="VOUCHER 🎟️", text_color=("#8B75B0", "#6B5A8A"),
+                     font=FONT_LABEL, width=120, anchor="w").pack(side="left")
+        vc_vcmd_e = (dlg.register(lambda s: (s == "" or s.isdigit()) and len(s) <= 13), "%P")
+        vc_entry_e = ctk.CTkEntry(vc_row_e, fg_color=("#251540", "#EDE8F5"),
+                                  border_color=("#5C2483", "#5C2483"),
+                                  text_color=("#EDE8F5", "#1A0A2E"),
+                                  placeholder_text="13-digit voucher code",
+                                  placeholder_text_color=("#8B75B0", "#6B5A8A"),
+                                  font=FONT_MONO_S, height=36,
+                                  validate="key", validatecommand=vc_vcmd_e)
+        vc_entry_e.pack(side="left", fill="x", expand=True)
+        vc_entry_e.insert(0, d.get("VOUCHER", ""))
+
+        def _sync_plan_e(*_):
+            if pt_var.get() == "Prepaid":
+                tr_menu.configure(values=list(PREPAID_CODE_MAP_E.keys()))
+                tr_var.set(list(PREPAID_CODE_MAP_E.keys())[0])
+                vc_row_e.pack(fill="x", padx=12, pady=5)
+            else:
+                tr_menu.configure(values=list(POSTPAID_CODE_MAP_E.keys()))
+                tr_var.set("Yeni Her Yere")
+                vc_row_e.pack_forget()
+
+        if is_prepaid_now:
+            vc_row_e.pack(fill="x", padx=12, pady=5)
+
         def save():
             row_data = {k: v.get().strip() for k, v in fields.items()}
             row_data["SIMCARD"]       = sc_entry.get().strip()
             row_data["PLAN_TYPE"]     = pt_var.get()
             row_data["PLAN_TYPE_REG"] = pt_var.get()
-            row_data["TARIFF"]        = "" if pt_var.get() == "Prepaid" else TARIFF_CODE_MAP.get(tr_var.get(), "371")
-            row_data["TARIFF_TYPE"]   = TARIFF_TYPE_MAP[tt_var.get()]
+            if pt_var.get() == "Prepaid":
+                row_data["TARIFF"]  = PREPAID_CODE_MAP_E.get(tr_var.get(), "1091")
+                row_data["VOUCHER"] = vc_entry_e.get().strip()
+            else:
+                row_data["TARIFF"]  = POSTPAID_CODE_MAP_E.get(tr_var.get(), "371")
+                row_data["VOUCHER"] = ""
+            row_data["TARIFF_TYPE"] = TARIFF_TYPE_MAP[tt_var.get()]
             if not row_data["MSISDN"] or not sc_entry.get().strip():
                 return
             self._test_data[self._sel_row] = row_data

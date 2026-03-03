@@ -8,33 +8,21 @@
     "mode": "parallel",
     "test_data": [
       {
-        "MSISDN": "102989141",
+        "MSISDN": "102989147",
         "DOC_NUMBER": "AA0877974",
         "DOC_PIN": "70HF8GF",
-        "SIMCARD": "2411010161316",
-        "PLAN_TYPE": "PostPaid",
-        "PLAN_TYPE_REG": "PostPaid",
-        "TARIFF": "940",
+        "SIMCARD": "2412022684592",
+        "PLAN_TYPE": "Prepaid",
+        "PLAN_TYPE_REG": "Prepaid",
+        "TARIFF": "1091",
+        "VOUCHER": "2792372678078",
         "TARIFF_TYPE": "flat"
       }
-    ],
-    "history": []
+    ]
   },
   "planning": {
     "username": "ccequlamova",
     "password": "Yltak_141012#",
-    "planning_data": [
-      {
-        "MSISDN": "102989142",
-        "SIMCARD": "89994012411010160888",
-        "PLAN_TYPE": "PostPaid",
-        "USAGE": "VOICE",
-        "SEGMENT": "2",
-        "PRICE": "",
-        "PUBLIC": "0",
-        "NUMBER_TYPE": "EXTERNAL",
-        "DESCRIPTION": ""
-      }
-    ]
+    "planning_data": []
   }
 }
