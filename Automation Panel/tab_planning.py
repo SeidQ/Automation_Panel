@@ -1,6 +1,6 @@
 """
 tab_planning.py — Tab 1: Number Planning (Dealer Express — Selenium)
-v5.2 — Tariff selector: scrollable listbox instead of dropdown.
+v5.3 — Dropdown overlay fix: place()-based popups, no layout push.
 """
 import os
 import csv
@@ -351,6 +351,147 @@ def _style_dialog(dlg):
 
 
 # ══════════════════════════════════════════════════════
+#  OVERLAY DROPDOWN HELPER
+#  Toplevel popup — layout-u itələmir, etibarlı açılır
+# ══════════════════════════════════════════════════════
+def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
+    """
+    Dropdown using a borderless Toplevel popup window.
+    Never pushes sibling widgets. Returns a StringVar.
+    """
+    import tkinter as tk
+
+    val    = default if default in values else (values[0] if values else "")
+    var    = ctk.StringVar(value=val)
+    _popup = [None]
+
+    # ── Trigger ──────────────────────────────────────
+    trigger = ctk.CTkFrame(
+        parent_row,
+        fg_color=("#251540", "#EDE8F5"),
+        corner_radius=8, border_width=1,
+        border_color=("#5C2483", "#5C2483"),
+        cursor="hand2", height=36)
+    trigger.pack(side="left", fill="x", expand=True)
+    trigger.pack_propagate(False)
+
+    lbl = ctk.CTkLabel(
+        trigger, text=f"  {val}",
+        font=FONT_MONO_S, anchor="w",
+        text_color=("#EDE8F5", "#1A0A2E"))
+    lbl.pack(side="left", fill="x", expand=True, padx=(4, 0), pady=4)
+
+    arr = ctk.CTkLabel(
+        trigger, text="▾",
+        font=("Segoe UI", 12),
+        text_color=("#8B75B0", "#6B5A8A"), width=28)
+    arr.pack(side="right", padx=(0, 6), pady=4)
+
+    def _close():
+        if _popup[0] is not None:
+            try:
+                _popup[0].destroy()
+            except Exception:
+                pass
+            _popup[0] = None
+        arr.configure(text="▾")
+
+    def _select(v):
+        var.set(v)
+        lbl.configure(text=f"  {v}")
+        _close()
+        if on_change:
+            on_change(v)
+
+    def _open():
+        _close()  # close existing first
+        dlg.update_idletasks()
+
+        # Absolute screen coordinates
+        rx = trigger.winfo_rootx()
+        ry = trigger.winfo_rooty() + trigger.winfo_height()
+        tw = trigger.winfo_width()
+
+        item_h   = 30
+        max_show = 6
+        n        = len(values)
+        list_h   = item_h * min(n, max_show) + 8
+
+        # Borderless Toplevel
+        popup = tk.Toplevel(dlg)
+        popup.wm_overrideredirect(True)
+        popup.wm_geometry(f"{tw}x{list_h}+{rx}+{ry}")
+        popup.lift()
+        popup.focus_set()
+
+        # Dark background frame inside toplevel
+        bg = "#251540"
+        frame = tk.Frame(popup, bg=bg, bd=1, relief="solid",
+                         highlightbackground="#5C2483", highlightthickness=1)
+        frame.pack(fill="both", expand=True)
+
+        # Scrollable if needed — no scrollbar, mousewheel only
+        if n > max_show:
+            canvas = tk.Canvas(frame, bg=bg, highlightthickness=0,
+                               width=tw - 4, height=list_h - 8)
+            canvas.pack(fill="both", expand=True)
+            inner = tk.Frame(canvas, bg=bg)
+            canvas_win = canvas.create_window((0, 0), window=inner, anchor="nw")
+            def _on_resize(e):
+                canvas.configure(scrollregion=canvas.bbox("all"))
+                canvas.itemconfig(canvas_win, width=canvas.winfo_width())
+            inner.bind("<Configure>", _on_resize)
+            def _on_wheel(e):
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            canvas.bind_all("<MouseWheel>", _on_wheel)
+            popup.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+            container = inner
+        else:
+            container = frame
+
+        cur = var.get()
+        for v in values:
+            is_sel = (v == cur)
+            fg_btn  = "#5C2483" if is_sel else bg
+            fg_text = "white"   if is_sel else "#EDE8F5"
+
+            btn = tk.Button(
+                container, text=f"  {v}",
+                font=("Consolas", 11),
+                bg=fg_btn, fg=fg_text,
+                activebackground="#3D2260", activeforeground="white",
+                relief="flat", anchor="w", bd=0, padx=6, pady=4,
+                cursor="hand2",
+                command=lambda v=v: _select(v))
+            btn.pack(fill="x", pady=1, padx=2)
+
+            def _on_enter(e, b=btn, v=v):
+                b.configure(bg="#3D2260", fg="white")
+            def _on_leave(e, b=btn, v=v, sel=(v == cur)):
+                b.configure(bg="#5C2483" if sel else bg, fg="white" if sel else "#EDE8F5")
+            btn.bind("<Enter>", _on_enter)
+            btn.bind("<Leave>", _on_leave)
+
+        # Close when clicking outside
+        popup.bind("<FocusOut>", lambda e: _close())
+
+        _popup[0] = popup
+        arr.configure(text="▴")
+
+    def _toggle(e=None):
+        if _popup[0] is not None:
+            _close()
+        else:
+            _open()
+
+    trigger.bind("<Button-1>", lambda e: (_toggle(), "break"))
+    lbl.bind("<Button-1>",     lambda e: (_toggle(), "break"))
+    arr.bind("<Button-1>",     lambda e: (_toggle(), "break"))
+
+    return var
+
+
+# ══════════════════════════════════════════════════════
 #  TAB 1 UI CLASS
 # ══════════════════════════════════════════════════════
 class TabPlanning:
@@ -588,7 +729,6 @@ class TabPlanning:
         dlg.title("✎  Edit Row" if is_edit else "＋  Add Row")
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
-        # dialog daha hündür — tariff listbox üçün yer var
         _center_on_parent(dlg, self._tab, w=520, h=680)
         _style_dialog(dlg)
 
@@ -631,21 +771,6 @@ class TabPlanning:
                 e.insert(0, str(default))
             return e
 
-        def _option_widget(parent_row, values, default=""):
-            var = ctk.StringVar(value=default if default in values else values[0])
-            ctk.CTkOptionMenu(
-                parent_row, values=values, variable=var,
-                font=FONT_MONO_S,
-                fg_color=("#251540", "#EDE8F5"),
-                button_color=("#5C2483", "#5C2483"),
-                button_hover_color=("#7C6EB0", "#7C6EB0"),
-                dropdown_fg_color=("#1C1030", "#FFFFFF"),
-                text_color=("#EDE8F5", "#1A0A2E"),
-                dropdown_text_color="#EDE8F5",
-                dropdown_hover_color="#3D2260",
-            ).pack(side="left", fill="x", expand=True)
-            return var
-
         e_msisdn  = _entry_widget(_row("MSISDN"), d.get("MSISDN", ""),
                                   digits_only=True, max_len=9)
 
@@ -669,116 +794,36 @@ class TabPlanning:
         existing_sc = d.get("SIMCARD", "")
         e_simcard.insert(0, existing_sc[7:] if existing_sc.startswith("8999401") else existing_sc)
 
-        v_plan    = _option_widget(_row("Plan Type"),
+        # All overlay dropdowns — no pack-push problem
+        v_plan    = _mk_overlay_dd(_row("Plan Type"),
+                                   dlg,
                                    ["PostPaid", "Prepaid"],
                                    d.get("PLAN_TYPE", "PostPaid"))
-        v_usage   = _option_widget(_row("Usage Type"),
+        v_usage   = _mk_overlay_dd(_row("Usage Type"),
+                                   dlg,
                                    ["VOICE", "DATA"],
                                    d.get("USAGE", "VOICE"))
         seg_disp  = _SEGMENT_RMAP.get(d.get("SEGMENT", "2"), "B2C  (2)")
-        v_seg     = _option_widget(_row("Segment"),
+        v_seg     = _mk_overlay_dd(_row("Segment"),
+                                   dlg,
                                    list(_SEGMENT_OPTS.keys()), seg_disp)
         e_price   = _entry_widget(_row("Price (qepik)"),
                                   d.get("PRICE", ""), digits_only=True, max_len=10)
         pub_def   = "0  (not public)" if d.get("PUBLIC", "0") == "0" else "1  (public)"
-        v_public  = _option_widget(_row("Public"),
+        v_public  = _mk_overlay_dd(_row("Public"),
+                                   dlg,
                                    ["0  (not public)", "1  (public)"], pub_def)
-        v_numtype = _option_widget(_row("Number Type"),
+        v_numtype = _mk_overlay_dd(_row("Number Type"),
+                                   dlg,
                                    ["EXTERNAL", "INTERNAL", "GOLDEN"],
                                    d.get("NUMBER_TYPE", "EXTERNAL"))
         e_desc    = _entry_widget(_row("Description"), d.get("DESCRIPTION", ""))
 
-        # ── Update Tariff — dropdown toggle ────────────
-        tr_outer = ctk.CTkFrame(frm, fg_color="transparent")
-        tr_outer.pack(fill="x", padx=12, pady=5)
-
-        ctk.CTkLabel(
-            tr_outer, text="Update Tariff",
-            text_color=("#8B75B0", "#6B5A8A"),
-            font=FONT_LABEL, width=130, anchor="nw"
-        ).pack(side="left", anchor="n", pady=4)
-
-        tr_right = ctk.CTkFrame(tr_outer, fg_color="transparent")
-        tr_right.pack(side="left", fill="x", expand=True)
-
-        _cur_tariff = d.get("UPDATE_TARIFF", "normal")
-        v_tariff_var = ctk.StringVar(value=_cur_tariff)
-        _dropdown_open = [False]
-
-        # Dropdown trigger düyməsi
-        def _toggle_dropdown():
-            if _dropdown_open[0]:
-                list_frame.pack_forget()
-                _dropdown_open[0] = False
-                _toggle_btn.configure(text=f"  {v_tariff_var.get()}  ▾")
-            else:
-                list_frame.pack(fill="x", padx=2, pady=(0, 4))
-                _dropdown_open[0] = True
-                _toggle_btn.configure(text=f"  {v_tariff_var.get()}  ▴")
-
-        _toggle_btn = ctk.CTkButton(
-            tr_right,
-            text=f"  {_cur_tariff}  ▾",
-            font=("Consolas", 12),
-            height=36,
-            anchor="w",
-            corner_radius=8,
-            fg_color=("#251540", "#EDE8F5"),
-            hover_color=("#3D2260", "#C4B0DC"),
-            border_width=1,
-            border_color=("#5C2483", "#5C2483"),
-            text_color=("#EDE8F5", "#1A0A2E"),
-            command=_toggle_dropdown,
-        )
-        _toggle_btn.pack(fill="x", padx=2, pady=(0, 2))
-
-        # Scrollable list — başlanğıcda gizli
-        list_frame = ctk.CTkScrollableFrame(
-            tr_right,
-            fg_color=("#251540", "#EDE8F5"),
-            corner_radius=8,
-            height=160,
-            scrollbar_button_color=("#3D2260", "#C4B0DC"),
-            scrollbar_button_hover_color=("#7C6EB0", "#7C6EB0"),
-        )
-        # list_frame pack edilmir — toggle ilə açılır
-
-        _tariff_btns = {}
-
-        def _select_tariff(tariff):
-            v_tariff_var.set(tariff)
-            _toggle_btn.configure(text=f"  {tariff}  ▾")
-            for t, b in _tariff_btns.items():
-                b.configure(
-                    fg_color=("#5C2483", "#5C2483") if t == tariff else "transparent",
-                    text_color="white" if t == tariff else "#EDE8F5"
-                )
-            # Seçim edildikdən sonra avtomatik bağla
-            list_frame.pack_forget()
-            _dropdown_open[0] = False
-
-        for t in _UPDATE_TARIFFS:
-            is_sel = (t == _cur_tariff)
-            btn = ctk.CTkButton(
-                list_frame,
-                text=t,
-                font=("Consolas", 11),
-                height=30,
-                anchor="w",
-                corner_radius=6,
-                fg_color=("#5C2483", "#5C2483") if is_sel else "transparent",
-                hover_color=("#3D2260", "#C4B0DC"),
-                text_color="white" if is_sel else "#EDE8F5",
-                command=lambda tariff=t: _select_tariff(tariff),
-            )
-            btn.pack(fill="x", pady=1, padx=4)
-            _tariff_btns[t] = btn
-
-        # v_tariff proxy — save() funksiyası .get() çağırır
-        class _TariffProxy:
-            def get(self_inner):
-                return v_tariff_var.get()
-        v_tariff = _TariffProxy()
+        # ── Update Tariff — overlay dropdown ──────────
+        v_tariff  = _mk_overlay_dd(_row("Update Tariff"),
+                                   dlg,
+                                   _UPDATE_TARIFFS,
+                                   d.get("UPDATE_TARIFF", "normal"))
 
         # ── Save ──────────────────────────────────────
         def save():

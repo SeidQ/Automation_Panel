@@ -131,7 +131,6 @@ def create_session(base_url, username, password):
         "Upgrade-Insecure-Requests": "1",
     })
 
-    # ADDIM 1: Login səhifəsinə GET — server SESSION + TS01... cookie-lərini verir
     s.get(
         f"{base_url}/login",
         headers={"Sec-Fetch-Dest": "document",
@@ -142,7 +141,6 @@ def create_session(base_url, username, password):
         timeout=20,
     )
 
-    # ADDIM 2: Cookie-lərlə POST et (browser axını ilə eyni)
     login_resp = s.post(
         f"{base_url}/login",
         data={"username": username, "password": password},
@@ -163,7 +161,6 @@ def create_session(base_url, username, password):
     if login_resp.status_code in (301, 302, 303, 307, 308):
         if "/login" in location:
             raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
-        # Uğurlu redirect — follow et
         s.get(
             location if location.startswith("http") else f"{base_url}{location}",
             headers={"Sec-Fetch-Dest": "document",
@@ -177,11 +174,9 @@ def create_session(base_url, username, password):
         if "invalid" in body or "incorrect" in body or "bad credentials" in body:
             raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
 
-    # SESSION cookie yoxlanışı
     if not s.cookies.get("SESSION"):
         raise Exception("Login failed — Sessiya yaradıla bilmədi, istifadəçi adı/şifrəni yoxlayın")
 
-    # /customer-ə daxil ol — CSRF token al
     page = s.get(
         f"{base_url}/customer",
         headers={"Sec-Fetch-Dest": "document",
@@ -483,6 +478,117 @@ class MsisdnCard:
 
 
 # ══════════════════════════════════════════════════════
+#  OVERLAY DROPDOWN HELPER
+#  Toplevel popup — layout-u itələmir, etibarlı açılır
+# ══════════════════════════════════════════════════════
+def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
+    """
+    Dropdown using a borderless Toplevel popup window.
+    Never pushes sibling widgets. Returns a StringVar.
+    """
+    import tkinter as tk
+
+    val    = default if default in values else (values[0] if values else "")
+    var    = ctk.StringVar(value=val)
+    _popup = [None]
+
+    # ── Trigger ──────────────────────────────────────
+    trigger = ctk.CTkFrame(
+        parent_row,
+        fg_color=("#251540", "#EDE8F5"),
+        corner_radius=8, border_width=1,
+        border_color=("#5C2483", "#5C2483"),
+        cursor="hand2", height=36)
+    trigger.pack(side="left", fill="x", expand=True)
+    trigger.pack_propagate(False)
+
+    lbl = ctk.CTkLabel(
+        trigger, text=f"  {val}",
+        font=FONT_MONO_S, anchor="w",
+        text_color=("#EDE8F5", "#1A0A2E"))
+    lbl.pack(side="left", fill="x", expand=True, padx=(4, 0), pady=4)
+
+    arr = ctk.CTkLabel(
+        trigger, text="▾",
+        font=("Segoe UI", 12),
+        text_color=("#8B75B0", "#6B5A8A"), width=28)
+    arr.pack(side="right", padx=(0, 6), pady=4)
+
+    def _close():
+        if _popup[0] is not None:
+            try:
+                _popup[0].destroy()
+            except Exception:
+                pass
+            _popup[0] = None
+        arr.configure(text="▾")
+
+    def _select(v):
+        var.set(v)
+        lbl.configure(text=f"  {v}")
+        _close()
+        if on_change:
+            on_change(v)
+
+    def _open():
+        _close()
+        dlg.update_idletasks()
+
+        rx = trigger.winfo_rootx()
+        ry = trigger.winfo_rooty() + trigger.winfo_height()
+        tw = trigger.winfo_width()
+
+        item_h   = 30
+        max_show = 6
+        n        = len(values)
+        list_h   = item_h * min(n, max_show) + 8
+
+        popup = tk.Toplevel(dlg)
+        popup.wm_overrideredirect(True)
+        popup.wm_geometry(f"{tw}x{list_h}+{rx}+{ry}")
+        popup.lift()
+        popup.focus_set()
+
+        bg = "#251540"
+        frame = tk.Frame(popup, bg=bg, bd=1, relief="solid",
+                         highlightbackground="#5C2483", highlightthickness=1)
+        frame.pack(fill="both", expand=True)
+
+        if n > max_show:
+            canvas = tk.Canvas(frame, bg=bg, highlightthickness=0,
+                               width=tw - 4, height=list_h - 8)
+            canvas.pack(fill="both", expand=True)
+            inner = tk.Frame(canvas, bg=bg)
+            canvas_win = canvas.create_window((0, 0), window=inner, anchor="nw")
+            def _on_resize(e):
+                canvas.configure(scrollregion=canvas.bbox("all"))
+                canvas.itemconfig(canvas_win, width=canvas.winfo_width())
+            inner.bind("<Configure>", _on_resize)
+            def _on_wheel(e):
+                canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+            canvas.bind_all("<MouseWheel>", _on_wheel)
+            popup.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+            container = inner
+        else:
+            container = frame
+
+        _popup[0] = popup
+        arr.configure(text="▴")
+
+    def _toggle(e=None):
+        if _popup[0] is not None:
+            _close()
+        else:
+            _open()
+
+    trigger.bind("<Button-1>", lambda e: (_toggle(), "break"))
+    lbl.bind("<Button-1>",     lambda e: (_toggle(), "break"))
+    arr.bind("<Button-1>",     lambda e: (_toggle(), "break"))
+
+    return var
+
+
+# ══════════════════════════════════════════════════════
 #  TAB 2 UI CLASS
 # ══════════════════════════════════════════════════════
 class TabActivation:
@@ -663,7 +769,6 @@ class TabActivation:
         if s.get("test_data"):
             self._test_data = s["test_data"]
             self._render_data()
-        # FIX 1: history-i yüklə
         if s.get("history"):
             self._history = s["history"]
 
@@ -676,7 +781,7 @@ class TabActivation:
             "email":     self._c_email.get(),
             "mode":      self._thread_var.get(),
             "test_data": self._test_data,
-            "history":   self._history,  # FIX 2: history-i saxla
+            "history":   self._history,
         })
 
     # ══════════════════════════════════════════════════
@@ -812,7 +917,6 @@ class TabActivation:
         threading.Thread(target=worker, daemon=True).start()
 
     def _force_done(self):
-        # on_done() yalnız buradan çağrılır — _poll-dan çağrılmır
         if self._results:
             self.on_done()
         else:
@@ -858,7 +962,6 @@ class TabActivation:
                 entry["TIME"] = datetime.now().strftime("%H:%M:%S")
                 self._history.append(entry)
         self._show_summary()
-        # FIX 4: history-i dərhal JSON-a yaz
         self._autosave()
         return passed, failed
 
@@ -917,20 +1020,78 @@ class TabActivation:
         ctk.CTkLabel(col1, text="📋  TARIFF", font=("Segoe UI", 10, "bold"),
                      text_color=("#8B75B0", "#6B5A8A")).pack(anchor="w", padx=12, pady=(8, 3))
         self._hist_tariff_var = ctk.StringVar(value="All Tariffs")
-        # FIX 5: Prepaid tarifləri də filtrdə var
         all_tariffs = (["All Tariffs"]
                        + list(TARIFF_RCODE_MAP.values())
                        + list(PREPAID_TARIFF_MAP.values()))
-        ctk.CTkOptionMenu(col1, values=all_tariffs, variable=self._hist_tariff_var,
-                          font=("Segoe UI", 11), fg_color=("#1C1030", "#FFFFFF"),
-                          button_color=("#5C2483", "#5C2483"),
-                          button_hover_color=("#7C6EB0", "#7C6EB0"),
-                          dropdown_fg_color=("#1C1030", "#FFFFFF"),
-                          text_color=("#EDE8F5", "#1A0A2E"),
-                          dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
-                          height=36, corner_radius=8,
-                          command=lambda _: self._hist_refresh()
-                          ).pack(fill="x", padx=12, pady=(0, 10))
+
+        _ht_open = [False]
+        _ht_btns = {}
+        _ht_wrap = ctk.CTkFrame(col1, fg_color="transparent")
+        _ht_wrap.pack(fill="x", padx=12, pady=(0, 10))
+
+        def _ht_close():
+            _ht_lf.pack_forget()
+            _ht_open[0] = False
+            _ht_arr.configure(text="▾")
+
+        def _ht_select(v):
+            self._hist_tariff_var.set(v)
+            _ht_lbl.configure(text=f"  {v}")
+            for t, b in _ht_btns.items():
+                b.configure(
+                    fg_color=("#5C2483","#5C2483") if t==v else "transparent",
+                    text_color="white" if t==v else "#EDE8F5")
+            _ht_close()
+            self._hist_refresh()
+
+        def _ht_toggle():
+            if _ht_open[0]:
+                _ht_close()
+            else:
+                _ht_lf.pack(fill="x", pady=(0,2))
+                _ht_open[0] = True
+                _ht_arr.configure(text="▴")
+
+        _ht_trigger = ctk.CTkFrame(
+            _ht_wrap, fg_color=("#1C1030","#FFFFFF"),
+            corner_radius=8, border_width=1,
+            border_color=("#5C2483","#5C2483"),
+            cursor="hand2", height=36)
+        _ht_trigger.pack(fill="x", pady=(0,2))
+        _ht_trigger.pack_propagate(False)
+        _ht_trigger.bind("<Button-1>", lambda e: _ht_toggle())
+
+        _ht_lbl = ctk.CTkLabel(
+            _ht_trigger, text="  All Tariffs",
+            font=("Segoe UI", 11), anchor="w",
+            text_color=("#EDE8F5","#1A0A2E"))
+        _ht_lbl.pack(side="left", fill="x", expand=True, padx=(4,0), pady=4)
+        _ht_lbl.bind("<Button-1>", lambda e: _ht_toggle())
+
+        _ht_arr = ctk.CTkLabel(
+            _ht_trigger, text="▾",
+            font=("Segoe UI", 12),
+            text_color=("#8B75B0","#6B5A8A"), width=28)
+        _ht_arr.pack(side="right", padx=(0,6), pady=4)
+        _ht_arr.bind("<Button-1>", lambda e: _ht_toggle())
+
+        _ht_n = len(all_tariffs)
+        _ht_h = 32 * min(_ht_n, 5)
+        _ht_lf = ctk.CTkScrollableFrame(
+            _ht_wrap, fg_color=("#251540","#EDE8F5"), corner_radius=8, height=_ht_h,
+            scrollbar_button_color=("#3D2260","#C4B0DC"),
+            scrollbar_button_hover_color=("#7C6EB0","#7C6EB0"))
+
+        for v in all_tariffs:
+            b = ctk.CTkButton(
+                _ht_lf, text=v, font=("Consolas",11), height=28,
+                anchor="w", corner_radius=6,
+                fg_color=("#5C2483","#5C2483") if v=="All Tariffs" else "transparent",
+                hover_color=("#3D2260","#C4B0DC"),
+                text_color="white" if v=="All Tariffs" else "#EDE8F5",
+                command=lambda v=v: _ht_select(v))
+            b.pack(fill="x", pady=1, padx=4)
+            _ht_btns[v] = b
 
         col2 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col2.grid(row=1, column=2, sticky="nsew", padx=(5, 12), pady=(0, 12))
@@ -1011,7 +1172,6 @@ class TabActivation:
         if msisdn_q:
             rows = [r for r in rows if msisdn_q in r.get("MSISDN", "")]
         if tariff_q != "All Tariffs":
-            # FIX 6: həm PostPaid həm Prepaid düzgün filtr olunur
             rows = [r for r in rows
                     if TARIFF_RCODE_MAP.get(r.get("TARIFF", ""), "") == tariff_q
                     or PREPAID_TARIFF_MAP.get(r.get("TARIFF", ""), "") == tariff_q]
@@ -1052,7 +1212,6 @@ class TabActivation:
             ctk.CTkLabel(rc, text=r.get("PLAN_TYPE", "—"), font=("Segoe UI", 11),
                          text_color=("#8B75B0", "#6B5A8A"), width=88, anchor="w"
                          ).pack(side="left", padx=4, pady=8)
-            # FIX 7: Prepaid tariff adını da düzgün göstər
             tariff_code = r.get("TARIFF", "")
             tariff_display = (TARIFF_RCODE_MAP.get(tariff_code)
                               or PREPAID_TARIFF_MAP.get(tariff_code)
@@ -1183,18 +1342,11 @@ class TabActivation:
                                 validate="key", validatecommand=sc_vcmd)
         sc_entry.pack(side="left", fill="x", expand=True)
 
+        # ── PLAN TYPE — overlay dropdown ──────────────
         pt_row = ctk.CTkFrame(frm, fg_color="transparent")
         pt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(pt_row, text="PLAN_TYPE", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        pt_var = ctk.StringVar(value="PostPaid")
-        ctk.CTkOptionMenu(pt_row, values=["PostPaid", "Prepaid"], variable=pt_var,
-                          font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
-                          button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
-                          dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
-                          dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
-                          command=lambda _: _sync_plan()
-                          ).pack(side="left", fill="x", expand=True)
 
         POSTPAID_CODE_MAP = {
             "Yeni Her Yere": "371", "SuperSen 3GB":  "939",
@@ -1203,31 +1355,134 @@ class TabActivation:
         }
         PREPAID_CODE_MAP_LOCAL = {v: k for k, v in PREPAID_TARIFF_MAP.items()}
 
+        # ── TARIFF — overlay dropdown (rebuilt on plan change) ──
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
         tr_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        tr_var = ctk.StringVar(value="Yeni Her Yere")
-        tr_menu = ctk.CTkOptionMenu(
-            tr_row, values=list(POSTPAID_CODE_MAP.keys()), variable=tr_var,
-            font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
-            button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
-            dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
-            dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260")
-        tr_menu.pack(side="left", fill="x", expand=True)
 
+        tr_var = ctk.StringVar(value="Yeni Her Yere")
+        _tr_state  = {"open": False}
+        _tr_btns   = {}
+        _tr_popup  = [None]
+        _tr_values = [list(POSTPAID_CODE_MAP.keys())]  # mutable ref
+
+        tr_trigger = ctk.CTkFrame(
+            tr_row,
+            fg_color=("#251540", "#EDE8F5"),
+            corner_radius=8, border_width=1,
+            border_color=("#5C2483", "#5C2483"),
+            cursor="hand2", height=36)
+        tr_trigger.pack(side="left", fill="x", expand=True)
+        tr_trigger.pack_propagate(False)
+
+        tr_lbl = ctk.CTkLabel(
+            tr_trigger, text=f"  {tr_var.get()}",
+            font=FONT_MONO_S, anchor="w",
+            text_color=("#EDE8F5", "#1A0A2E"))
+        tr_lbl.pack(side="left", fill="x", expand=True, padx=(4, 0), pady=4)
+
+        tr_arr = ctk.CTkLabel(
+            tr_trigger, text="▾",
+            font=("Segoe UI", 12),
+            text_color=("#8B75B0", "#6B5A8A"), width=28)
+        tr_arr.pack(side="right", padx=(0, 6), pady=4)
+
+        def _tr_close():
+            if _tr_popup[0] is not None:
+                try:
+                    _tr_popup[0].destroy()
+                except Exception:
+                    pass
+                _tr_popup[0] = None
+            tr_arr.configure(text="▾")
+
+        def _tr_select(v):
+            tr_var.set(v)
+            tr_lbl.configure(text=f"  {v}")
+            _tr_close()
+
+        def _tr_open_popup():
+            import tkinter as tk
+            _tr_close()
+            dlg.update_idletasks()
+            rx = tr_trigger.winfo_rootx()
+            ry = tr_trigger.winfo_rooty() + tr_trigger.winfo_height()
+            tw = tr_trigger.winfo_width()
+
+            vals     = _tr_values[0]
+            item_h   = 30
+            max_show = 6
+            n        = len(vals)
+            list_h   = item_h * min(n, max_show) + 8
+
+            popup = tk.Toplevel(dlg)
+            popup.wm_overrideredirect(True)
+            popup.wm_geometry(f"{tw}x{list_h}+{rx}+{ry}")
+            popup.lift()
+            popup.focus_set()
+
+            bg = "#251540"
+            frame = tk.Frame(popup, bg=bg, bd=1, relief="solid",
+                             highlightbackground="#5C2483", highlightthickness=1)
+            frame.pack(fill="both", expand=True)
+
+            if n > max_show:
+                canvas = tk.Canvas(frame, bg=bg, highlightthickness=0,
+                                   width=tw - 4, height=list_h - 8)
+                canvas.pack(fill="both", expand=True)
+                inner = tk.Frame(canvas, bg=bg)
+                cw = canvas.create_window((0, 0), window=inner, anchor="nw")
+                def _on_r(e):
+                    canvas.configure(scrollregion=canvas.bbox("all"))
+                    canvas.itemconfig(cw, width=canvas.winfo_width())
+                inner.bind("<Configure>", _on_r)
+                def _on_wheel_tr(e):
+                    canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                canvas.bind_all("<MouseWheel>", _on_wheel_tr)
+                popup.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+                container = inner
+            else:
+                container = frame
+
+            cur = tr_var.get()
+            for v in vals:
+                is_sel  = (v == cur)
+                fg_btn  = "#5C2483" if is_sel else bg
+                btn = tk.Button(
+                    container, text=f"  {v}", font=("Consolas", 11),
+                    bg=fg_btn, fg="white" if is_sel else "#EDE8F5",
+                    activebackground="#3D2260", activeforeground="white",
+                    relief="flat", anchor="w", bd=0, padx=6, pady=4,
+                    cursor="hand2", command=lambda v=v: _tr_select(v))
+                btn.pack(fill="x", pady=1, padx=2)
+                def _oe(e, b=btn): b.configure(bg="#3D2260", fg="white")
+                def _ol(e, b=btn, s=is_sel): b.configure(bg="#5C2483" if s else bg, fg="white" if s else "#EDE8F5")
+                btn.bind("<Enter>", _oe)
+                btn.bind("<Leave>", _ol)
+
+            popup.bind("<FocusOut>", lambda e: _tr_close())
+            _tr_popup[0]      = popup
+            tr_arr.configure(text="▴")
+
+        def _tr_toggle(e=None):
+            if _tr_popup[0] is not None:
+                _tr_close()
+            else:
+                _tr_open_popup()
+
+        tr_trigger.bind("<Button-1>", lambda e: (_tr_toggle(), "break"))
+        tr_lbl.bind("<Button-1>",     lambda e: (_tr_toggle(), "break"))
+        tr_arr.bind("<Button-1>",     lambda e: (_tr_toggle(), "break"))
+
+        # ── TARIFF_TYPE — overlay dropdown ────────────
         tt_row = ctk.CTkFrame(frm, fg_color="transparent")
         tt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tt_row, text="TARIFF_TYPE", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        tt_var = ctk.StringVar(value="Individual")
-        ctk.CTkOptionMenu(tt_row, values=list(TARIFF_TYPE_MAP.keys()), variable=tt_var,
-                          font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
-                          button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
-                          dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
-                          dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
-                          ).pack(side="left", fill="x", expand=True)
+        tt_var = _mk_overlay_dd(tt_row, dlg, list(TARIFF_TYPE_MAP.keys()), "Individual")
 
+        # ── VOUCHER row (prepaid only) ─────────────────
         vc_row = ctk.CTkFrame(frm, fg_color="transparent")
         ctk.CTkLabel(vc_row, text="VOUCHER 🎟️", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
@@ -1241,17 +1496,27 @@ class TabActivation:
                                 validate="key", validatecommand=vc_vcmd)
         vc_entry.pack(side="left", fill="x", expand=True)
 
-        def _sync_plan(*_):
-            if pt_var.get() == "Prepaid":
-                tr_menu.configure(values=list(PREPAID_CODE_MAP_LOCAL.keys()))
-                tr_var.set(list(PREPAID_CODE_MAP_LOCAL.keys())[0])
+        def _sync_plan(plan_val):
+            if plan_val == "Prepaid":
+                _tr_values[0] = list(PREPAID_CODE_MAP_LOCAL.keys())
+                first = _tr_values[0][0]
+                tr_var.set(first)
+                tr_lbl.configure(text=f"  {first}")
                 vc_row.pack(fill="x", padx=12, pady=5)
             else:
-                tr_menu.configure(values=list(POSTPAID_CODE_MAP.keys()))
-                tr_var.set("Yeni Her Yere")
+                _tr_values[0] = list(POSTPAID_CODE_MAP.keys())
+                first = _tr_values[0][0]
+                tr_var.set(first)
+                tr_lbl.configure(text=f"  {first}")
                 vc_row.pack_forget()
+            # close tariff popup if open
+            _tr_close()
 
-        _sync_plan()
+        pt_var = _mk_overlay_dd(pt_row, dlg, ["PostPaid", "Prepaid"], "PostPaid",
+                                on_change=_sync_plan)
+
+        # close all popups when clicking dialog background
+        dlg.bind("<Button-1>", lambda e: (_tr_close()), add="+")
 
         def save():
             row_data = {k: v.get().strip() for k, v in fields.items()}
@@ -1264,7 +1529,7 @@ class TabActivation:
             else:
                 row_data["TARIFF"]  = POSTPAID_CODE_MAP.get(tr_var.get(), "371")
                 row_data["VOUCHER"] = ""
-            row_data["TARIFF_TYPE"] = TARIFF_TYPE_MAP[tt_var.get()]
+            row_data["TARIFF_TYPE"] = TARIFF_TYPE_MAP.get(tt_var.get(), "flat")
             if not row_data["MSISDN"] or not sc_entry.get().strip():
                 return
             self._test_data.append(row_data)
@@ -1351,47 +1616,143 @@ class TabActivation:
             pp_rmap = {v: k for k, v in POSTPAID_CODE_MAP_E.items()}
             init_tr = pp_rmap.get(d.get("TARIFF", "371"), "Yeni Her Yere")
 
+        init_plan_vals = list(PREPAID_CODE_MAP_E.keys()) if is_prepaid_now else list(POSTPAID_CODE_MAP_E.keys())
+        _tr_values_e = [init_plan_vals]
+
+        # ── TARIFF — overlay dropdown ─────────────────
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
         tr_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        tr_var = ctk.StringVar(value=init_tr)
-        init_vals = list(PREPAID_CODE_MAP_E.keys()) if is_prepaid_now else list(POSTPAID_CODE_MAP_E.keys())
-        tr_menu = ctk.CTkOptionMenu(tr_row, values=init_vals, variable=tr_var,
-                                    font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
-                                    button_color=("#5C2483", "#5C2483"),
-                                    button_hover_color=("#7C6EB0", "#7C6EB0"),
-                                    dropdown_fg_color=("#1C1030", "#FFFFFF"),
-                                    text_color=("#EDE8F5", "#1A0A2E"),
-                                    dropdown_text_color="#EDE8F5",
-                                    dropdown_hover_color="#3D2260")
-        tr_menu.pack(side="left", fill="x", expand=True)
 
+        tr_var = ctk.StringVar(value=init_tr)
+        _tr_state_e  = {"open": False}
+        _tr_btns_e   = {}
+        _tr_popup_e  = [None]
+
+        tr_trigger_e = ctk.CTkFrame(
+            tr_row,
+            fg_color=("#251540", "#EDE8F5"),
+            corner_radius=8, border_width=1,
+            border_color=("#5C2483", "#5C2483"),
+            cursor="hand2", height=36)
+        tr_trigger_e.pack(side="left", fill="x", expand=True)
+        tr_trigger_e.pack_propagate(False)
+
+        tr_lbl_e = ctk.CTkLabel(
+            tr_trigger_e, text=f"  {init_tr}",
+            font=FONT_MONO_S, anchor="w",
+            text_color=("#EDE8F5", "#1A0A2E"))
+        tr_lbl_e.pack(side="left", fill="x", expand=True, padx=(4, 0), pady=4)
+
+        tr_arr_e = ctk.CTkLabel(
+            tr_trigger_e, text="▾",
+            font=("Segoe UI", 12),
+            text_color=("#8B75B0", "#6B5A8A"), width=28)
+        tr_arr_e.pack(side="right", padx=(0, 6), pady=4)
+
+        def _tr_close_e():
+            if _tr_popup_e[0] is not None:
+                try:
+                    _tr_popup_e[0].destroy()
+                except Exception:
+                    pass
+                _tr_popup_e[0] = None
+            tr_arr_e.configure(text="▾")
+
+        def _tr_select_e(v):
+            tr_var.set(v)
+            tr_lbl_e.configure(text=f"  {v}")
+            _tr_close_e()
+
+        def _tr_open_popup_e():
+            import tkinter as tk
+            _tr_close_e()
+            dlg.update_idletasks()
+            rx = tr_trigger_e.winfo_rootx()
+            ry = tr_trigger_e.winfo_rooty() + tr_trigger_e.winfo_height()
+            tw = tr_trigger_e.winfo_width()
+
+            vals     = _tr_values_e[0]
+            item_h   = 30
+            max_show = 6
+            n        = len(vals)
+            list_h   = item_h * min(n, max_show) + 8
+
+            popup = tk.Toplevel(dlg)
+            popup.wm_overrideredirect(True)
+            popup.wm_geometry(f"{tw}x{list_h}+{rx}+{ry}")
+            popup.lift()
+            popup.focus_set()
+
+            bg = "#251540"
+            frame = tk.Frame(popup, bg=bg, bd=1, relief="solid",
+                             highlightbackground="#5C2483", highlightthickness=1)
+            frame.pack(fill="both", expand=True)
+
+            if n > max_show:
+                canvas = tk.Canvas(frame, bg=bg, highlightthickness=0,
+                                   width=tw - 4, height=list_h - 8)
+                canvas.pack(fill="both", expand=True)
+                inner = tk.Frame(canvas, bg=bg)
+                cw = canvas.create_window((0, 0), window=inner, anchor="nw")
+                def _on_r(e):
+                    canvas.configure(scrollregion=canvas.bbox("all"))
+                    canvas.itemconfig(cw, width=canvas.winfo_width())
+                inner.bind("<Configure>", _on_r)
+                def _on_wheel_tre(e):
+                    canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+                canvas.bind_all("<MouseWheel>", _on_wheel_tre)
+                popup.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
+                container = inner
+            else:
+                container = frame
+
+            cur = tr_var.get()
+            for v in vals:
+                is_sel  = (v == cur)
+                btn = tk.Button(
+                    container, text=f"  {v}", font=("Consolas", 11),
+                    bg="#5C2483" if is_sel else bg,
+                    fg="white" if is_sel else "#EDE8F5",
+                    activebackground="#3D2260", activeforeground="white",
+                    relief="flat", anchor="w", bd=0, padx=6, pady=4,
+                    cursor="hand2", command=lambda v=v: _tr_select_e(v))
+                btn.pack(fill="x", pady=1, padx=2)
+                def _oe(e, b=btn): b.configure(bg="#3D2260", fg="white")
+                def _ol(e, b=btn, s=is_sel): b.configure(bg="#5C2483" if s else bg, fg="white" if s else "#EDE8F5")
+                btn.bind("<Enter>", _oe)
+                btn.bind("<Leave>", _ol)
+
+            popup.bind("<FocusOut>", lambda e: _tr_close_e())
+            _tr_popup_e[0]      = popup
+            tr_arr_e.configure(text="▴")
+
+        def _tr_toggle_e(e=None):
+            if _tr_popup_e[0] is not None:
+                _tr_close_e()
+            else:
+                _tr_open_popup_e()
+
+        tr_trigger_e.bind("<Button-1>", lambda e: (_tr_toggle_e(), "break"))
+        tr_lbl_e.bind("<Button-1>",     lambda e: (_tr_toggle_e(), "break"))
+        tr_arr_e.bind("<Button-1>",     lambda e: (_tr_toggle_e(), "break"))
+
+        # ── PLAN TYPE ─────────────────────────────────
         pt_row = ctk.CTkFrame(frm, fg_color="transparent")
         pt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(pt_row, text="PLAN_TYPE", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        pt_var = ctk.StringVar(value=d.get("PLAN_TYPE", "PostPaid"))
-        ctk.CTkOptionMenu(pt_row, values=["PostPaid", "Prepaid"], variable=pt_var,
-                          font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
-                          button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
-                          dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
-                          dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
-                          command=lambda _: _sync_plan_e()
-                          ).pack(side="left", fill="x", expand=True)
 
+        # ── TARIFF_TYPE ───────────────────────────────
         tt_row = ctk.CTkFrame(frm, fg_color="transparent")
         tt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tt_row, text="TARIFF_TYPE", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
-        tt_var = ctk.StringVar(value=TARIFF_TYPE_RMAP.get(d.get("TARIFF_TYPE", "flat"), "Individual"))
-        ctk.CTkOptionMenu(tt_row, values=list(TARIFF_TYPE_MAP.keys()), variable=tt_var,
-                          font=FONT_MONO_S, fg_color=("#251540", "#EDE8F5"),
-                          button_color=("#5C2483", "#5C2483"), button_hover_color=("#7C6EB0", "#7C6EB0"),
-                          dropdown_fg_color=("#1C1030", "#FFFFFF"), text_color=("#EDE8F5", "#1A0A2E"),
-                          dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
-                          ).pack(side="left", fill="x", expand=True)
+        tt_var = _mk_overlay_dd(tt_row, dlg, list(TARIFF_TYPE_MAP.keys()),
+                                TARIFF_TYPE_RMAP.get(d.get("TARIFF_TYPE", "flat"), "Individual"))
 
+        # ── VOUCHER ───────────────────────────────────
         vc_row_e = ctk.CTkFrame(frm, fg_color="transparent")
         ctk.CTkLabel(vc_row_e, text="VOUCHER 🎟️", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
@@ -1406,18 +1767,29 @@ class TabActivation:
         vc_entry_e.pack(side="left", fill="x", expand=True)
         vc_entry_e.insert(0, d.get("VOUCHER", ""))
 
-        def _sync_plan_e(*_):
-            if pt_var.get() == "Prepaid":
-                tr_menu.configure(values=list(PREPAID_CODE_MAP_E.keys()))
-                tr_var.set(list(PREPAID_CODE_MAP_E.keys())[0])
+        def _sync_plan_e(plan_val):
+            if plan_val == "Prepaid":
+                _tr_values_e[0] = list(PREPAID_CODE_MAP_E.keys())
+                first = _tr_values_e[0][0]
+                tr_var.set(first)
+                tr_lbl_e.configure(text=f"  {first}")
                 vc_row_e.pack(fill="x", padx=12, pady=5)
             else:
-                tr_menu.configure(values=list(POSTPAID_CODE_MAP_E.keys()))
-                tr_var.set("Yeni Her Yere")
+                _tr_values_e[0] = list(POSTPAID_CODE_MAP_E.keys())
+                first = _tr_values_e[0][0]
+                tr_var.set(first)
+                tr_lbl_e.configure(text=f"  {first}")
                 vc_row_e.pack_forget()
+            _tr_close_e()
+
+        pt_var = _mk_overlay_dd(pt_row, dlg, ["PostPaid", "Prepaid"],
+                                d.get("PLAN_TYPE", "PostPaid"),
+                                on_change=_sync_plan_e)
 
         if is_prepaid_now:
             vc_row_e.pack(fill="x", padx=12, pady=5)
+
+        dlg.bind("<Button-1>", lambda e: (_tr_close_e()), add="+")
 
         def save():
             row_data = {k: v.get().strip() for k, v in fields.items()}
@@ -1430,7 +1802,7 @@ class TabActivation:
             else:
                 row_data["TARIFF"]  = POSTPAID_CODE_MAP_E.get(tr_var.get(), "371")
                 row_data["VOUCHER"] = ""
-            row_data["TARIFF_TYPE"] = TARIFF_TYPE_MAP[tt_var.get()]
+            row_data["TARIFF_TYPE"] = TARIFF_TYPE_MAP.get(tt_var.get(), "flat")
             if not row_data["MSISDN"] or not sc_entry.get().strip():
                 return
             self._test_data[self._sel_row] = row_data
