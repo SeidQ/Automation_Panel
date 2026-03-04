@@ -105,64 +105,102 @@ def _extract_csrf(html):
 
 
 def create_session(base_url, username, password):
+    from requests.adapters import HTTPAdapter
+
     s = requests.Session()
+
+    adapter = HTTPAdapter(
+        pool_connections=20,
+        pool_maxsize=20,
+        max_retries=2,
+        pool_block=False,
+    )
+    s.mount("https://", adapter)
+    s.mount("http://",  adapter)
+
     s.headers.update({
-        "User-Agent":       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                            "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0",
-        "Accept-Language":  "en-US,en;q=0.9",
-        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent":        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                             "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 Edg/145.0.0.0",
+        "Accept-Language":   "en-US,en;q=0.9",
+        "Accept":            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                             "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                             "application/signed-exchange;v=b3;q=0.7",
+        "sec-ch-ua":         '"Not:A-Brand";v="99", "Microsoft Edge";v="145", "Chromium";v="145"',
+        "sec-ch-ua-mobile":  "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "Upgrade-Insecure-Requests": "1",
     })
 
-    # allow_redirects=False — login cavabının URL-inə baxırıq
+    # ADDIM 1: Login səhifəsinə GET — server SESSION + TS01... cookie-lərini verir
+    s.get(
+        f"{base_url}/login",
+        headers={"Sec-Fetch-Dest": "document",
+                 "Sec-Fetch-Mode": "navigate",
+                 "Sec-Fetch-Site": "none",
+                 "Cache-Control":  "max-age=0"},
+        allow_redirects=True,
+        timeout=20,
+    )
+
+    # ADDIM 2: Cookie-lərlə POST et (browser axını ilə eyni)
     login_resp = s.post(
         f"{base_url}/login",
         data={"username": username, "password": password},
-        headers={"Content-Type": "application/x-www-form-urlencoded",
-                 "Accept":       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                 "Referer":      f"{base_url}/login",
-                 "Origin":       base_url},
-        allow_redirects=False)
+        headers={"Content-Type":  "application/x-www-form-urlencoded",
+                 "Origin":         base_url,
+                 "Referer":        f"{base_url}/login",
+                 "Sec-Fetch-Dest": "document",
+                 "Sec-Fetch-Mode": "navigate",
+                 "Sec-Fetch-Site": "same-origin",
+                 "Sec-Fetch-User": "?1",
+                 "Cache-Control":  "max-age=0"},
+        allow_redirects=False,
+        timeout=20,
+    )
 
-    # Uğurlu login → /customer-ə redirect edir
-    # Uğursuz login → /login?error=... və ya /login-ə qayıdır
     location = login_resp.headers.get("Location", "")
 
     if login_resp.status_code in (301, 302, 303, 307, 308):
         if "/login" in location:
-            # Server login səhifəsinə geri redirect etdi — credentials səhvdir
-            # Error parametrini yoxlayaq
-            if "badCredentials" in location or "error" in location:
-                # İstifadəçi adı mövcuddursa amma şifrə səhvdirsə server
-                # adətən ?error=badCredentials qaytarır
-                raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
             raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
-        # Uğurlu redirect — qalan hissəni yükləyək
-        s.get(f"{base_url}{location}",
-              headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
-              allow_redirects=True)
+        # Uğurlu redirect — follow et
+        s.get(
+            location if location.startswith("http") else f"{base_url}{location}",
+            headers={"Sec-Fetch-Dest": "document",
+                     "Sec-Fetch-Mode": "navigate",
+                     "Sec-Fetch-Site": "same-origin"},
+            allow_redirects=True,
+            timeout=20,
+        )
     elif login_resp.status_code == 200:
-        # Redirect yox, birbaşa 200 — login səhifəsi geri qaytarılıb (credentials səhv)
         body = login_resp.text.lower()
-        if "invalid" in body or "incorrect" in body or "error" in body or "səhv" in body:
+        if "invalid" in body or "incorrect" in body or "bad credentials" in body:
             raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
-        # Bəzən 200 ilə uğurlu login də ola bilər, davam edirik
 
     # SESSION cookie yoxlanışı
     if not s.cookies.get("SESSION"):
         raise Exception("Login failed — Sessiya yaradıla bilmədi, istifadəçi adı/şifrəni yoxlayın")
 
-    # /customer səhifəsinə daxil olmağa cəhd et — əsl yoxlama
-    page = s.get(f"{base_url}/customer",
-                 headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
-                 allow_redirects=True)
+    # /customer-ə daxil ol — CSRF token al
+    page = s.get(
+        f"{base_url}/customer",
+        headers={"Sec-Fetch-Dest": "document",
+                 "Sec-Fetch-Mode": "navigate",
+                 "Sec-Fetch-Site": "same-origin"},
+        allow_redirects=True,
+        timeout=20,
+    )
 
-    # Əgər /customer-ə girə bilmirik və login səhifəsinə yönləndiriliriksə
     if "/login" in page.url:
         raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
 
     csrf = _extract_csrf(page.text) or s.cookies.get("XSRF-TOKEN")
     if csrf:
-        s.headers.update({"X-CSRF-TOKEN": csrf})
+        s.headers.update({"X-CSRF-TOKEN": csrf,
+                          "X-Requested-With": "XMLHttpRequest"})
+    else:
+        s.headers.update({"X-Requested-With": "XMLHttpRequest"})
+
     return s
 
 
@@ -175,7 +213,8 @@ def check_mhm(session, base_url, data):
                 "documentPin": data["DOC_PIN"], "requestType": data["TARIFF_TYPE"],
                 "companySun": "", "segmentType": ""},
         headers={"Accept":  "application/json, text/javascript, */*; q=0.01",
-                 "Referer": f"{base_url}/customer"})
+                 "Referer": f"{base_url}/customer"},
+        timeout=20)
     body = r.text.strip()
     if not body or body.startswith("<!"):
         raise Exception("checkMHM: session invalid")
@@ -191,7 +230,8 @@ def add_voucher(session, base_url, voucher, msisdn, simcard):
         params={"voucher": voucher, "msisdn": msisdn, "serial": simcard},
         headers={"Accept":  "application/json, text/javascript, */*; q=0.01",
                  "Referer": f"{base_url}/customer",
-                 "X-KL-Ajax-Request": "Ajax_Request"})
+                 "X-KL-Ajax-Request": "Ajax_Request"},
+        timeout=20)
 
     if r.status_code == 404:
         raise Exception("addVoucher: Vauçer sistemdə tapılmadı")
@@ -240,7 +280,8 @@ def register_customer(session, base_url, data, consts):
                 "campaign": "0", "shouldOpenIntLine": "false",
                 "shouldBlockAds": "false", "shouldRefuseVHF": "false",
                 "street": "", "segmentType": ""},
-        headers={"Accept": "application/json", "Referer": f"{base_url}/customer"})
+        headers={"Accept": "application/json", "Referer": f"{base_url}/customer"},
+        timeout=30)
 
     try:
         j = r.json()
@@ -286,7 +327,16 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
             return
 
         log(0, "Connecting to Dealer Online...")
-        session = create_session(base_url, username, password)
+        try:
+            session = create_session(base_url, username, password)
+        except requests.exceptions.ConnectionError:
+            raise Exception("VPN bağlantısı yoxdur — dealer-online.azercell.com əlçatmazdır")
+        except requests.exceptions.Timeout:
+            raise Exception("Server cavab vermədi — VPN bağlantısını yoxlayın")
+        except requests.exceptions.RequestException as e:
+            if "HTTPConnectionPool" in str(e) or "ConnectionPool" in str(e):
+                raise Exception("VPN bağlantısı yoxdur — dealer-online.azercell.com əlçatmazdır")
+            raise
         log(0, "Session created", "success")
 
         log(1, "Validating document & MHM check...")
@@ -315,7 +365,9 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
             step_idx = 2
         elif "checkMHM" in raw or "addVoucher" in raw:
             step_idx = 1
-        elif "Login failed" in raw or "SESSION" in raw or "session invalid" in raw.lower() or "Sessiya" in raw:
+        elif ("Login failed" in raw or "SESSION" in raw or
+              "session invalid" in raw.lower() or "Sessiya" in raw or
+              "VPN" in raw or "əlçatmaz" in raw or "timeout" in raw.lower()):
             step_idx = 0
         else:
             step_idx = 0
@@ -760,12 +812,13 @@ class TabActivation:
         threading.Thread(target=worker, daemon=True).start()
 
     def _force_done(self):
-        # FIX 3: on_done() çağır ki history düşsün və JSON-a yazılsın
-        self._running = False
-        self._run_btn.configure(state="normal")
-        self._cancel_btn.configure(state="disabled")
+        # on_done() yalnız buradan çağrılır — _poll-dan çağrılmır
         if self._results:
             self.on_done()
+        else:
+            self._running = False
+            self._run_btn.configure(state="normal")
+            self._cancel_btn.configure(state="disabled")
 
     def _on_cancel(self):
         self._stop_ev.set()

@@ -1,6 +1,6 @@
 {
   "activation": {
-    "username": "ccequlamovaaaa",
+    "username": "ccequlamova",
     "password": "dealeronline",
     "ph1p": "10",
     "ph1n": "2210462",
@@ -8,14 +8,25 @@
     "mode": "parallel",
     "test_data": [
       {
-        "MSISDN": "102989147",
+        "MSISDN": "102989149",
         "DOC_NUMBER": "AA0877974",
         "DOC_PIN": "70HF8GF",
-        "SIMCARD": "2412022684592",
-        "PLAN_TYPE": "Prepaid",
-        "PLAN_TYPE_REG": "Prepaid",
-        "TARIFF": "1112",
-        "VOUCHER": "2792372678078",
+        "SIMCARD": "2401250948605",
+        "PLAN_TYPE": "PostPaid",
+        "PLAN_TYPE_REG": "PostPaid",
+        "TARIFF": "371",
+        "VOUCHER": "",
+        "TARIFF_TYPE": "flat"
+      },
+      {
+        "MSISDN": "102989148",
+        "DOC_NUMBER": "AA0877974",
+        "DOC_PIN": "70HF8GF",
+        "SIMCARD": "2401250948563",
+        "PLAN_TYPE": "PostPaid",
+        "PLAN_TYPE_REG": "PostPaid",
+        "TARIFF": "371",
+        "VOUCHER": "",
         "TARIFF_TYPE": "flat"
       }
     ],
@@ -73,12 +84,73 @@
         "STATUS": "FAILED",
         "ERROR": "session invalid",
         "TIME": "11:01:09"
+      },
+      {
+        "MSISDN": "102989149",
+        "PLAN_TYPE": "PostPaid",
+        "TARIFF": "371",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "PASSED",
+        "ERROR": "",
+        "TIME": "15:16:01"
+      },
+      {
+        "MSISDN": "102989148",
+        "PLAN_TYPE": "PostPaid",
+        "TARIFF": "371",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "PASSED",
+        "ERROR": "",
+        "TIME": "15:16:01"
+      },
+      {
+        "MSISDN": "102989149",
+        "PLAN_TYPE": "PostPaid",
+        "TARIFF": "371",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "PASSED",
+        "ERROR": "",
+        "TIME": "15:16:01"
+      },
+      {
+        "MSISDN": "102989148",
+        "PLAN_TYPE": "PostPaid",
+        "TARIFF": "371",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "PASSED",
+        "ERROR": "",
+        "TIME": "15:16:01"
       }
     ]
   },
   "planning": {
     "username": "ccequlamova",
     "password": "Yltak_141012#",
-    "planning_data": []
+    "planning_data": [
+      {
+        "MSISDN": "102989148",
+        "SIMCARD": "89994012401250948563",
+        "PLAN_TYPE": "PostPaid",
+        "USAGE": "VOICE",
+        "SEGMENT": "2",
+        "PRICE": "",
+        "PUBLIC": "0",
+        "NUMBER_TYPE": "EXTERNAL",
+        "DESCRIPTION": "",
+        "UPDATE_TARIFF": "normal"
+      },
+      {
+        "MSISDN": "102989149",
+        "SIMCARD": "89994012401250948605",
+        "PLAN_TYPE": "PostPaid",
+        "USAGE": "VOICE",
+        "SEGMENT": "2",
+        "PRICE": "",
+        "PUBLIC": "0",
+        "NUMBER_TYPE": "EXTERNAL",
+        "DESCRIPTION": "",
+        "UPDATE_TARIFF": "normal"
+      }
+    ]
   }
 }

@@ -1,13 +1,6 @@
 """
 tab_planning.py — Tab 1: Number Planning (Dealer Express — Selenium)
-v5.1 — CSV auto-generation integrated.
-
-Dəyişikliklər:
-  • Fayl seçmə sahələri ÇIXARILDI
-  • Sağ paneldə data-entry cədvəli əlavə edildi (Activation tabı kimi)
-  • START zamanı 3 CSV avtomatik yaradılır (csv.QUOTE_ALL — type mismatch yoxdur)
-  • Selenium müvəqqəti CSV-ləri upload edir, iş bitdikdən sonra silinir
-  • Bütün mövcud Selenium məntiqi dəyişdirilmədən saxlanıldı
+v5.2 — Tariff selector: scrollable listbox instead of dropdown.
 """
 import os
 import csv
@@ -30,7 +23,7 @@ from widgets import mk_section, mk_field, mk_divider, mk_panel_header, mk_label
 
 
 # ══════════════════════════════════════════════════════
-#  CSV HEADERS  (portalın gözlədiyi dəqiq sütun adları)
+#  CSV HEADERS
 # ══════════════════════════════════════════════════════
 _PLAN_HEADERS = [
     "Msisdn (9 digits long)",
@@ -64,15 +57,43 @@ _SEGMENT_OPTS = {
 }
 _SEGMENT_RMAP = {v: k for k, v in _SEGMENT_OPTS.items()}
 
+_UPDATE_TARIFFS = [
+    "normal",
+    "B2B_010_c1",
+    "B2B_010_c2",
+    "B2B_010_c3",
+    "B2B_010_c4",
+    "B2B_010_c5",
+    "B2B_010_c6",
+    "B2B_Gold",
+    "B2B_Stndrd",
+    "askercell",
+    "azercell_test",
+    "b2c_010",
+    "b2c_010_prep",
+    "b2c_010_veteran",
+    "data",
+    "data_109AZN",
+    "data_129AZN",
+    "data_129AZN_WTTX",
+    "data_159AZN_WTTX",
+    "data_99AZN",
+    "data_mifi",
+    "data_new",
+    "data_old",
+    "dovletcell",
+    "esimesim_datafwa_devices",
+    "gencol9",
+    "unimediacell",
+    "naxtel",
+    "test_data_prepaid",
+]
+
 
 # ══════════════════════════════════════════════════════
 #  CSV GENERATOR
 # ══════════════════════════════════════════════════════
 def _write_csv(path, headers, rows):
-    """
-    Dırnaqsız CSV — portal plain text gözləyir.
-    utf-8-sig encoding BOM əlavə edir ki, portal encoding xətası verməsin.
-    """
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
         writer.writerow(headers)
@@ -80,10 +101,6 @@ def _write_csv(path, headers, rows):
 
 
 def build_csvs(data_rows):
-    """
-    UI data siyahısından 3 müvəqqəti CSV fayl yaradır.
-    Returns: (plan_path, update_path, assign_path)
-    """
     tmp = tempfile.gettempdir()
     ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -91,7 +108,7 @@ def build_csvs(data_rows):
     update_path = os.path.join(tmp, f"np_update_{ts}.csv")
     assign_path = os.path.join(tmp, f"np_assign_{ts}.csv")
 
-    plan_rows = []
+    plan_rows   = []
     update_rows = []
     assign_rows = []
 
@@ -113,7 +130,6 @@ def build_csvs(data_rows):
     _write_csv(plan_path,   _PLAN_HEADERS,   plan_rows)
     _write_csv(update_path, _UPDATE_HEADERS, update_rows)
 
-    # Assign: başlıqsız, yalnız MSISDN-lər
     with open(assign_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f, quoting=csv.QUOTE_MINIMAL)
         for row in assign_rows:
@@ -123,7 +139,7 @@ def build_csvs(data_rows):
 
 
 # ══════════════════════════════════════════════════════
-#  SELENIUM WORKER  (dəyişdirilmədən saxlanıldı)
+#  SELENIUM WORKER
 # ══════════════════════════════════════════════════════
 def _find_chromedriver():
     import shutil
@@ -168,7 +184,6 @@ def run_number_planning(cfg, log_q, stop_ev):
     wait30 = WebDriverWait(driver, 30)
 
     try:
-        # ── Login ──────────────────────────────────────
         log("🔐 Logging in to Dealer Express...")
         driver.get(
             "https://rhsso.azercell.com/auth/realms/external/protocol/openid-connect/auth"
@@ -188,7 +203,6 @@ def run_number_planning(cfg, log_q, stop_ev):
         wait30.until(EC.url_contains("dealerexpress.azercell.com"))
         log("✓ Login successful.", "success")
 
-        # ── Step 1 — Number Planning ───────────────────
         if stop_ev.is_set(): return
         log("📋 Navigating to Number Planning...")
         wait.until(EC.element_to_be_clickable(
@@ -201,7 +215,7 @@ def run_number_planning(cfg, log_q, stop_ev):
             (By.XPATH, "//input[@id='fileInput']")))
         driver.execute_script("arguments[0].style.display='block';", fi)
         fi.send_keys(cfg["plan_file"])
-        log(f"  ✓ Planning CSV uploaded.")
+        log("  ✓ Planning CSV uploaded.")
 
         wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//span[normalize-space()='Plan numbers']/parent::button"))).click()
@@ -211,7 +225,6 @@ def run_number_planning(cfg, log_q, stop_ev):
                        "//div[contains(@class,'success')] | //div[contains(@class,'alert')]")))
         _wait_toast_gone(driver, wait)
 
-        # ── Step 2 — Number Update ─────────────────────
         if stop_ev.is_set(): return
         log("🔄 Switching to Number Update tab...")
         wait.until(EC.element_to_be_clickable(
@@ -222,9 +235,12 @@ def run_number_planning(cfg, log_q, stop_ev):
         panel = wait.until(EC.presence_of_element_located(
             (By.XPATH, "//div[contains(@class,'mat-select-panel')]")))
         driver.execute_script("arguments[0].scrollTop = 1200;", panel)
+
+        _tariff = cfg.get("tariff", "normal")
         wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[@class='mat-option-text' and normalize-space()='normal']"))).click()
-        log("  ✓ 'normal' tariff selected.")
+            (By.XPATH, f"//span[@class='mat-option-text' and normalize-space()='{_tariff}']")
+        )).click()
+        log(f"  ✓ '{_tariff}' tariff selected.", "success")
 
         fi = wait.until(EC.presence_of_element_located(
             (By.XPATH, "//input[@id='fileInput']")))
@@ -240,7 +256,6 @@ def run_number_planning(cfg, log_q, stop_ev):
                        "//div[contains(@class,'success')] | //div[contains(@class,'alert')]")))
         _wait_toast_gone(driver, wait)
 
-        # ── Step 3 — Assign to Distributor ────────────
         if stop_ev.is_set(): return
         log("💼 Number Sales — Assigning to distributor...")
         wait.until(EC.element_to_be_clickable(
@@ -267,7 +282,6 @@ def run_number_planning(cfg, log_q, stop_ev):
                        "//div[contains(@class,'success')]")))
         _wait_toast_gone(driver, wait)
 
-        # ── Step 4 — Assign to Contractor Dealer ──────
         if stop_ev.is_set(): return
         log("🏢 Number Sales — Assigning to contractor dealer...")
         radio = wait.until(EC.presence_of_element_located(
@@ -302,7 +316,6 @@ def run_number_planning(cfg, log_q, stop_ev):
         raise
     finally:
         driver.quit()
-        # Müvəqqəti CSV-ləri sil
         for p in [cfg.get("plan_file"), cfg.get("update_file"), cfg.get("assign_file")]:
             try:
                 if p and os.path.exists(p):
@@ -349,11 +362,10 @@ class TabPlanning:
         self._T       = T
         self._running = False
         self._stop_ev = threading.Event()
-        self._data    = []      # list of row dicts
+        self._data    = []
         self._sel_row = None
         self._build()
 
-    # ── Build ──────────────────────────────────────────
     def _build(self):
         T   = self._T
         tab = self._tab
@@ -361,7 +373,7 @@ class TabPlanning:
         tab.columnconfigure(1, weight=5)
         tab.rowconfigure(0, weight=1)
 
-        # ── LEFT: login + buttons ─────────────────────
+        # ── LEFT panel ────────────────────────────────
         left = ctk.CTkScrollableFrame(
             tab, fg_color=("#1C1030", "#FFFFFF"), corner_radius=14,
             scrollbar_button_color=("#3D2260", "#C4B0DC"),
@@ -374,7 +386,6 @@ class TabPlanning:
         self._np_pass = mk_field(left, "Password", "Yltak_141012#", show="*")
         mk_divider(left)
 
-        # CSV info card
         info = ctk.CTkFrame(left, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         info.pack(fill="x", padx=14, pady=(0, 12))
         ctk.CTkLabel(
@@ -411,21 +422,19 @@ class TabPlanning:
             text_color=("#8B75B0", "#6B5A8A"), height=36, corner_radius=10,
             command=self._clear_log).pack(fill="x")
 
-        # ── RIGHT: data table + log ───────────────────
+        # ── RIGHT panel ───────────────────────────────
         right = ctk.CTkFrame(tab, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew")
         right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=2)   # data table
-        right.rowconfigure(3, weight=3)   # log
+        right.rowconfigure(1, weight=2)
+        right.rowconfigure(3, weight=3)
 
-        # Data table header
         th = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"),
                           corner_radius=12, height=52)
         th.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         th.pack_propagate(False)
 
-        mk_label(th, "📋  PLANNING DATA",
-                 color=C["muted"],
+        mk_label(th, "📋  PLANNING DATA", color=C["muted"],
                  font=("Segoe UI", 11, "bold")).pack(side="left", padx=18, pady=14)
 
         self._td_count = mk_label(
@@ -454,7 +463,6 @@ class TabPlanning:
             corner_radius=8, command=self._open_add
         ).pack(side="right", padx=6, pady=10)
 
-        # Data table textbox
         self._data_box = ctk.CTkTextbox(
             right, font=FONT_MONO_S,
             fg_color=("#1C1030", "#FFFFFF"),
@@ -465,7 +473,6 @@ class TabPlanning:
         self._data_box.bind("<Button-1>", self._on_row_click)
         self._render_data()
 
-        # Log header
         sh = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"),
                           corner_radius=12, height=52)
         sh.grid(row=2, column=0, sticky="ew", pady=(0, 8))
@@ -477,7 +484,6 @@ class TabPlanning:
             text_color=("#22C55E", "#16A34A"), fg_color="#0B2210", corner_radius=8)
         self._status_lbl.pack(side="right", padx=18, pady=14)
 
-        # Log textbox
         self._log_box = ctk.CTkTextbox(
             right, font=FONT_MONO_S, fg_color=("#1C1030", "#FFFFFF"),
             text_color=("#EDE8F5", "#1A0A2E"), border_color=("#3D2260", "#C4B0DC"),
@@ -488,7 +494,6 @@ class TabPlanning:
                            ("ts",      C["muted"])]:
             self._log_box.tag_config(tag, foreground=color)
 
-        # Load saved state
         self._load_state()
         for w in [self._np_user, self._np_pass]:
             w.bind("<FocusOut>",   self._autosave)
@@ -527,9 +532,9 @@ class TabPlanning:
 
         hdr = (f"{'#':<3}  {'MSISDN':<12}  {'SIMCARD':<22}  "
                f"{'PLAN':<9}  {'USAGE':<6}  {'SEG':<5}  "
-               f"{'PRICE':<8}  {'PUB':<4}  {'TYPE'}\n")
+               f"{'PRICE':<8}  {'PUB':<4}  {'TYPE':<10}  {'TARIFF'}\n")
         self._data_box.insert("end", hdr, "header")
-        self._data_box.insert("end", "─" * 96 + "\n", "header")
+        self._data_box.insert("end", "─" * 108 + "\n", "header")
 
         for i, d in enumerate(self._data, 1):
             line = (
@@ -541,7 +546,8 @@ class TabPlanning:
                 f"{d.get('SEGMENT','2'):<5}  "
                 f"{d.get('PRICE',''):<8}  "
                 f"{d.get('PUBLIC','0'):<4}  "
-                f"{d.get('NUMBER_TYPE','EXTERNAL')}\n"
+                f"{d.get('NUMBER_TYPE','EXTERNAL'):<10}  "
+                f"{d.get('UPDATE_TARIFF','normal')}\n"
             )
             self._data_box.insert(
                 "end", line,
@@ -582,7 +588,8 @@ class TabPlanning:
         dlg.title("✎  Edit Row" if is_edit else "＋  Add Row")
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
-        _center_on_parent(dlg, self._tab, w=520, h=600)
+        # dialog daha hündür — tariff listbox üçün yer var
+        _center_on_parent(dlg, self._tab, w=520, h=680)
         _style_dialog(dlg)
 
         hdr_col = "#B45309" if is_edit else "#5C2483"
@@ -598,7 +605,6 @@ class TabPlanning:
         frm = ctk.CTkScrollableFrame(dlg, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12)
         frm.pack(fill="both", expand=True, padx=16, pady=12)
 
-        # ── Helper closures ───────────────────────────
         def _row(label):
             r = ctk.CTkFrame(frm, fg_color="transparent")
             r.pack(fill="x", padx=12, pady=5)
@@ -640,11 +646,9 @@ class TabPlanning:
             ).pack(side="left", fill="x", expand=True)
             return var
 
-        # ── MSISDN ────────────────────────────────────
-        e_msisdn = _entry_widget(_row("MSISDN"), d.get("MSISDN", ""),
-                                 digits_only=True, max_len=9)
+        e_msisdn  = _entry_widget(_row("MSISDN"), d.get("MSISDN", ""),
+                                  digits_only=True, max_len=9)
 
-        # ── SIMCARD (prefix locked) ───────────────────
         sc_row = _row("SIMCARD")
         pfx = ctk.CTkEntry(
             sc_row, fg_color=("#3D2260", "#C4B0DC"),
@@ -654,7 +658,6 @@ class TabPlanning:
         pfx.insert(0, "8999401")
         pfx.configure(state="disabled")
         pfx.pack(side="left", padx=(0, 4))
-
         sc_vcmd = (dlg.register(
             lambda s: (s == "" or s.isdigit()) and len(s) <= 13), "%P")
         e_simcard = ctk.CTkEntry(
@@ -666,40 +669,116 @@ class TabPlanning:
         existing_sc = d.get("SIMCARD", "")
         e_simcard.insert(0, existing_sc[7:] if existing_sc.startswith("8999401") else existing_sc)
 
-        # ── Plan Type ─────────────────────────────────
-        v_plan = _option_widget(_row("Plan Type"),
-                                ["PostPaid", "Prepaid"],
-                                d.get("PLAN_TYPE", "PostPaid"))
-
-        # ── Usage ─────────────────────────────────────
-        v_usage = _option_widget(_row("Usage Type"),
-                                 ["VOICE", "DATA"],
-                                 d.get("USAGE", "VOICE"))
-
-        # ── Segment ───────────────────────────────────
-        seg_display = _SEGMENT_RMAP.get(d.get("SEGMENT", "2"), "B2C  (2)")
-        v_seg = _option_widget(_row("Segment"),
-                               list(_SEGMENT_OPTS.keys()),
-                               seg_display)
-
-        # ── Price ─────────────────────────────────────
-        e_price = _entry_widget(_row("Price (qepik)"),
-                                d.get("PRICE", ""),
-                                digits_only=True, max_len=10)
-
-        # ── Public ────────────────────────────────────
-        pub_default = "0  (not public)" if d.get("PUBLIC", "0") == "0" else "1  (public)"
-        v_public = _option_widget(_row("Public"),
-                                  ["0  (not public)", "1  (public)"],
-                                  pub_default)
-
-        # ── Number Type ───────────────────────────────
+        v_plan    = _option_widget(_row("Plan Type"),
+                                   ["PostPaid", "Prepaid"],
+                                   d.get("PLAN_TYPE", "PostPaid"))
+        v_usage   = _option_widget(_row("Usage Type"),
+                                   ["VOICE", "DATA"],
+                                   d.get("USAGE", "VOICE"))
+        seg_disp  = _SEGMENT_RMAP.get(d.get("SEGMENT", "2"), "B2C  (2)")
+        v_seg     = _option_widget(_row("Segment"),
+                                   list(_SEGMENT_OPTS.keys()), seg_disp)
+        e_price   = _entry_widget(_row("Price (qepik)"),
+                                  d.get("PRICE", ""), digits_only=True, max_len=10)
+        pub_def   = "0  (not public)" if d.get("PUBLIC", "0") == "0" else "1  (public)"
+        v_public  = _option_widget(_row("Public"),
+                                   ["0  (not public)", "1  (public)"], pub_def)
         v_numtype = _option_widget(_row("Number Type"),
                                    ["EXTERNAL", "INTERNAL", "GOLDEN"],
                                    d.get("NUMBER_TYPE", "EXTERNAL"))
+        e_desc    = _entry_widget(_row("Description"), d.get("DESCRIPTION", ""))
 
-        # ── Description ───────────────────────────────
-        e_desc = _entry_widget(_row("Description"), d.get("DESCRIPTION", ""))
+        # ── Update Tariff — dropdown toggle ────────────
+        tr_outer = ctk.CTkFrame(frm, fg_color="transparent")
+        tr_outer.pack(fill="x", padx=12, pady=5)
+
+        ctk.CTkLabel(
+            tr_outer, text="Update Tariff",
+            text_color=("#8B75B0", "#6B5A8A"),
+            font=FONT_LABEL, width=130, anchor="nw"
+        ).pack(side="left", anchor="n", pady=4)
+
+        tr_right = ctk.CTkFrame(tr_outer, fg_color="transparent")
+        tr_right.pack(side="left", fill="x", expand=True)
+
+        _cur_tariff = d.get("UPDATE_TARIFF", "normal")
+        v_tariff_var = ctk.StringVar(value=_cur_tariff)
+        _dropdown_open = [False]
+
+        # Dropdown trigger düyməsi
+        def _toggle_dropdown():
+            if _dropdown_open[0]:
+                list_frame.pack_forget()
+                _dropdown_open[0] = False
+                _toggle_btn.configure(text=f"  {v_tariff_var.get()}  ▾")
+            else:
+                list_frame.pack(fill="x", padx=2, pady=(0, 4))
+                _dropdown_open[0] = True
+                _toggle_btn.configure(text=f"  {v_tariff_var.get()}  ▴")
+
+        _toggle_btn = ctk.CTkButton(
+            tr_right,
+            text=f"  {_cur_tariff}  ▾",
+            font=("Consolas", 12),
+            height=36,
+            anchor="w",
+            corner_radius=8,
+            fg_color=("#251540", "#EDE8F5"),
+            hover_color=("#3D2260", "#C4B0DC"),
+            border_width=1,
+            border_color=("#5C2483", "#5C2483"),
+            text_color=("#EDE8F5", "#1A0A2E"),
+            command=_toggle_dropdown,
+        )
+        _toggle_btn.pack(fill="x", padx=2, pady=(0, 2))
+
+        # Scrollable list — başlanğıcda gizli
+        list_frame = ctk.CTkScrollableFrame(
+            tr_right,
+            fg_color=("#251540", "#EDE8F5"),
+            corner_radius=8,
+            height=160,
+            scrollbar_button_color=("#3D2260", "#C4B0DC"),
+            scrollbar_button_hover_color=("#7C6EB0", "#7C6EB0"),
+        )
+        # list_frame pack edilmir — toggle ilə açılır
+
+        _tariff_btns = {}
+
+        def _select_tariff(tariff):
+            v_tariff_var.set(tariff)
+            _toggle_btn.configure(text=f"  {tariff}  ▾")
+            for t, b in _tariff_btns.items():
+                b.configure(
+                    fg_color=("#5C2483", "#5C2483") if t == tariff else "transparent",
+                    text_color="white" if t == tariff else "#EDE8F5"
+                )
+            # Seçim edildikdən sonra avtomatik bağla
+            list_frame.pack_forget()
+            _dropdown_open[0] = False
+
+        for t in _UPDATE_TARIFFS:
+            is_sel = (t == _cur_tariff)
+            btn = ctk.CTkButton(
+                list_frame,
+                text=t,
+                font=("Consolas", 11),
+                height=30,
+                anchor="w",
+                corner_radius=6,
+                fg_color=("#5C2483", "#5C2483") if is_sel else "transparent",
+                hover_color=("#3D2260", "#C4B0DC"),
+                text_color="white" if is_sel else "#EDE8F5",
+                command=lambda tariff=t: _select_tariff(tariff),
+            )
+            btn.pack(fill="x", pady=1, padx=4)
+            _tariff_btns[t] = btn
+
+        # v_tariff proxy — save() funksiyası .get() çağırır
+        class _TariffProxy:
+            def get(self_inner):
+                return v_tariff_var.get()
+        v_tariff = _TariffProxy()
 
         # ── Save ──────────────────────────────────────
         def save():
@@ -707,40 +786,36 @@ class TabPlanning:
             sc_sfx = e_simcard.get().strip()
             if not msisdn or not sc_sfx:
                 return
-
             row_data = {
-                "MSISDN":      msisdn,
-                "SIMCARD":     "8999401" + sc_sfx,
-                "PLAN_TYPE":   v_plan.get(),
-                "USAGE":       v_usage.get(),
-                "SEGMENT":     _SEGMENT_OPTS.get(v_seg.get(), "2"),
-                "PRICE":       e_price.get().strip(),
-                "PUBLIC":      v_public.get().split()[0],   # "0" or "1"
-                "NUMBER_TYPE": v_numtype.get(),
-                "DESCRIPTION": e_desc.get().strip(),
+                "MSISDN":        msisdn,
+                "SIMCARD":       "8999401" + sc_sfx,
+                "PLAN_TYPE":     v_plan.get(),
+                "USAGE":         v_usage.get(),
+                "SEGMENT":       _SEGMENT_OPTS.get(v_seg.get(), "2"),
+                "PRICE":         e_price.get().strip(),
+                "PUBLIC":        v_public.get().split()[0],
+                "NUMBER_TYPE":   v_numtype.get(),
+                "DESCRIPTION":   e_desc.get().strip(),
+                "UPDATE_TARIFF": v_tariff.get(),
             }
-
             if is_edit:
                 self._data[edit_idx] = row_data
             else:
                 self._data.append(row_data)
-
             self._render_data()
             self._autosave()
             dlg.destroy()
 
-        btn_col  = "#B45309" if is_edit else "#5C2483"
-        btn_hvr  = "#92400E" if is_edit else "#7C6EB0"
-        btn_text = "✎  Save Changes" if is_edit else T("save")
-
         ctk.CTkButton(
-            dlg, text=btn_text,
-            fg_color=btn_col, hover_color=btn_hvr,
+            dlg,
+            text="✎  Save Changes" if is_edit else T("save"),
+            fg_color="#B45309" if is_edit else "#5C2483",
+            hover_color="#92400E" if is_edit else "#7C6EB0",
             text_color="white", font=("Segoe UI", 13, "bold"),
             height=44, corner_radius=10, command=save
         ).pack(fill="x", padx=16, pady=(0, 16))
 
-    # ── Start handler ──────────────────────────────────
+    # ── Start / Cancel / Done ──────────────────────────
     def _on_start(self):
         if self._running:
             return
@@ -748,7 +823,6 @@ class TabPlanning:
         username = self._np_user.get().strip()
         password = self._np_pass.get().strip()
 
-        # Validation
         missing = []
         if not username: missing.append("Username")
         if not password: missing.append("Password")
@@ -777,7 +851,6 @@ class TabPlanning:
 
         def worker():
             try:
-                # 1. CSV-ləri avtomatik yarat
                 self._log_q.put({
                     "ts": datetime.now().strftime("%H:%M:%S"),
                     "msg": f"📄 Generating CSVs for {len(data_snapshot)} row(s)...",
@@ -793,16 +866,17 @@ class TabPlanning:
                 if self._stop_ev.is_set():
                     return
 
-                # 2. Selenium işlət
-                cfg = {
+                _tariff = data_snapshot[0].get("UPDATE_TARIFF", "normal") if data_snapshot else "normal"
+                run_cfg = {
                     "chromedriver": "",
                     "username":     username,
                     "password":     password,
+                    "tariff":       _tariff,
                     "plan_file":    plan_path,
                     "update_file":  update_path,
                     "assign_file":  assign_path,
                 }
-                run_number_planning(cfg, self._log_q, self._stop_ev)
+                run_number_planning(run_cfg, self._log_q, self._stop_ev)
 
                 self._log_q.put({
                     "ts": datetime.now().strftime("%H:%M:%S"),

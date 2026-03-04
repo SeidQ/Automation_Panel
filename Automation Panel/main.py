@@ -290,19 +290,6 @@ class App(ctk.CTk):
                     self._tab_act.collect_result(r)
         except queue.Empty:
             pass
-
-        # Check completion
-        if (self._tab_act
-                and self._tab_act.is_running()
-                and len(self._tab_act._results) >= self._tab_act.get_test_count()):
-            passed, failed = self._tab_act.on_done()
-            self._set_status(
-                T("success_status") if failed == 0 else T("failed_status"),
-                C["success"] if failed == 0 else C["error"],
-                "#0B2210" if failed == 0 else "#2A0A0A")
-
-        self.after(80, self._poll)
-
     # ══════════════════════════════════════════════════
     #  STATUS BAR
     # ══════════════════════════════════════════════════
