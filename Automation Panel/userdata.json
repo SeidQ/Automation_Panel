@@ -1,6 +1,6 @@
 {
   "activation": {
-    "username": "ccequlamova",
+    "username": "ccequlamovaaaa",
     "password": "dealeronline",
     "ph1p": "10",
     "ph1n": "2210462",
@@ -14,9 +14,65 @@
         "SIMCARD": "2412022684592",
         "PLAN_TYPE": "Prepaid",
         "PLAN_TYPE_REG": "Prepaid",
-        "TARIFF": "1091",
+        "TARIFF": "1112",
         "VOUCHER": "2792372678078",
         "TARIFF_TYPE": "flat"
+      }
+    ],
+    "history": [
+      {
+        "MSISDN": "102989147",
+        "PLAN_TYPE": "Prepaid",
+        "TARIFF": "1112",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "FAILED",
+        "ERROR": "session invalid",
+        "TIME": "11:00:20"
+      },
+      {
+        "MSISDN": "102989147",
+        "PLAN_TYPE": "Prepaid",
+        "TARIFF": "1112",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "FAILED",
+        "ERROR": "session invalid",
+        "TIME": "11:00:21"
+      },
+      {
+        "MSISDN": "102989147",
+        "PLAN_TYPE": "Prepaid",
+        "TARIFF": "1112",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "FAILED",
+        "ERROR": "session invalid",
+        "TIME": "11:00:27"
+      },
+      {
+        "MSISDN": "102989147",
+        "PLAN_TYPE": "Prepaid",
+        "TARIFF": "1112",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "FAILED",
+        "ERROR": "session invalid",
+        "TIME": "11:00:27"
+      },
+      {
+        "MSISDN": "102989147",
+        "PLAN_TYPE": "Prepaid",
+        "TARIFF": "1112",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "FAILED",
+        "ERROR": "session invalid",
+        "TIME": "11:01:09"
+      },
+      {
+        "MSISDN": "102989147",
+        "PLAN_TYPE": "Prepaid",
+        "TARIFF": "1112",
+        "TARIFF_TYPE": "Individual",
+        "STATUS": "FAILED",
+        "ERROR": "session invalid",
+        "TIME": "11:01:09"
       }
     ]
   },

@@ -79,30 +79,13 @@ PREPAID_TARIFF_RMAP = {v: k for k, v in PREPAID_TARIFF_MAP.items()}
 #  ERROR MESSAGE CLEANER
 # ══════════════════════════════════════════════════════
 def _clean_error(msg: str) -> str:
-    """
-    Strip internal prefixes and HTTP/null boilerplate so only the
-    human-readable part is shown in the UI.
-
-    Examples:
-      "checkMHM: Simkart tapilmadi"          -> "Simkart tapilmadi"
-      "registerCustomer failed [500]: ..."   -> meaningful part only
-      "addVoucher: Voucher not found 500 null" -> "Voucher not found"
-    """
-    # Remove known function-level prefixes
-    for prefix in ("checkMHM: ", "registerCustomer failed ", "addVoucher: "):
+    for prefix in ("checkMHM: ", "registerCustomer failed: ", "addVoucher: "):
         if msg.startswith(prefix):
             msg = msg[len(prefix):]
-
-    # Strip leading HTTP bracket codes like "[500]: " or "500: "
     msg = re.sub(r"^\[?\d{3}\]?\s*[:\-]\s*", "", msg).strip()
-
-    # Strip trailing noise tokens: " 500", " null", " error", " Error", " None"
     msg = re.sub(r"(\s+(500|null|None|error|Error))+\s*$", "", msg).strip()
-
-    # If nothing useful remains, give a generic message
     if not msg or re.fullmatch(r"\d{3}", msg):
         msg = "Unexpected server error"
-
     return msg
 
 
@@ -129,17 +112,54 @@ def create_session(base_url, username, password):
         "Accept-Language":  "en-US,en;q=0.9",
         "X-Requested-With": "XMLHttpRequest",
     })
-    s.post(f"{base_url}/login",
-           data={"username": username, "password": password},
-           headers={"Content-Type": "application/x-www-form-urlencoded",
-                    "Accept":       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Referer":      f"{base_url}/login",
-                    "Origin":       base_url},
-           allow_redirects=True)
+
+    # allow_redirects=False — login cavabının URL-inə baxırıq
+    login_resp = s.post(
+        f"{base_url}/login",
+        data={"username": username, "password": password},
+        headers={"Content-Type": "application/x-www-form-urlencoded",
+                 "Accept":       "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                 "Referer":      f"{base_url}/login",
+                 "Origin":       base_url},
+        allow_redirects=False)
+
+    # Uğurlu login → /customer-ə redirect edir
+    # Uğursuz login → /login?error=... və ya /login-ə qayıdır
+    location = login_resp.headers.get("Location", "")
+
+    if login_resp.status_code in (301, 302, 303, 307, 308):
+        if "/login" in location:
+            # Server login səhifəsinə geri redirect etdi — credentials səhvdir
+            # Error parametrini yoxlayaq
+            if "badCredentials" in location or "error" in location:
+                # İstifadəçi adı mövcuddursa amma şifrə səhvdirsə server
+                # adətən ?error=badCredentials qaytarır
+                raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
+            raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
+        # Uğurlu redirect — qalan hissəni yükləyək
+        s.get(f"{base_url}{location}",
+              headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+              allow_redirects=True)
+    elif login_resp.status_code == 200:
+        # Redirect yox, birbaşa 200 — login səhifəsi geri qaytarılıb (credentials səhv)
+        body = login_resp.text.lower()
+        if "invalid" in body or "incorrect" in body or "error" in body or "səhv" in body:
+            raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
+        # Bəzən 200 ilə uğurlu login də ola bilər, davam edirik
+
+    # SESSION cookie yoxlanışı
     if not s.cookies.get("SESSION"):
-        raise Exception("Login failed — SESSION cookie not found.")
+        raise Exception("Login failed — Sessiya yaradıla bilmədi, istifadəçi adı/şifrəni yoxlayın")
+
+    # /customer səhifəsinə daxil olmağa cəhd et — əsl yoxlama
     page = s.get(f"{base_url}/customer",
-                 headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"})
+                 headers={"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+                 allow_redirects=True)
+
+    # Əgər /customer-ə girə bilmirik və login səhifəsinə yönləndiriliriksə
+    if "/login" in page.url:
+        raise Exception("Login failed — İstifadəçi adı və ya şifrə səhvdir")
+
     csrf = _extract_csrf(page.text) or s.cookies.get("XSRF-TOKEN")
     if csrf:
         s.headers.update({"X-CSRF-TOKEN": csrf})
@@ -173,7 +193,6 @@ def add_voucher(session, base_url, voucher, msisdn, simcard):
                  "Referer": f"{base_url}/customer",
                  "X-KL-Ajax-Request": "Ajax_Request"})
 
-    # 404 → voucher does not exist in the system
     if r.status_code == 404:
         raise Exception("addVoucher: Vauçer sistemdə tapılmadı")
 
@@ -181,22 +200,16 @@ def add_voucher(session, base_url, voucher, msisdn, simcard):
     if not body or body.startswith("<!"):
         raise Exception("addVoucher: session invalid")
 
-    # Parse JSON safely — malformed body should surface cleanly
     try:
         j = r.json()
     except Exception:
         raise Exception("addVoucher: Server returned an invalid response")
 
     if isinstance(j, dict):
-        # Check every common error field the API might use
         err = (j.get("errorMessage") or j.get("message") or
                j.get("error") or j.get("description") or j.get("detail"))
-
-        # Ignore null / empty / literal "null" string values
         if err and str(err).strip().lower() not in ("", "null", "none"):
             raise Exception(f"addVoucher: {err}")
-
-        # Explicit failure flags even when no message is set
         if j.get("success") is False or j.get("status") == "error":
             fallback = (j.get("description") or j.get("detail") or
                         "Vauçer sistemdə tapılmadı")
@@ -229,24 +242,22 @@ def register_customer(session, base_url, data, consts):
                 "street": "", "segmentType": ""},
         headers={"Accept": "application/json", "Referer": f"{base_url}/customer"})
 
-    # Parse JSON safely
     try:
         j = r.json()
     except Exception:
         j = None
 
-    # Extract clean error message from JSON body
     if isinstance(j, dict):
         err = (j.get("errorMessage") or j.get("message") or
                j.get("error") or j.get("description") or j.get("detail"))
         if err and str(err).strip().lower() not in ("", "null", "none"):
-            err_clean = str(err).strip().split(".")[0].strip()
+            err_clean = str(err).strip()
             raise Exception(f"registerCustomer failed: {err_clean}")
         if j.get("success") is False or j.get("status") == "error":
-            raise Exception("registerCustomer failed: Qeydiyyat zamanı xəta baş verdi")
+            raise Exception("registerCustomer failed: Nömrənin aktivasiyası zamanı xəta baş verdi")
 
     if r.status_code != 200:
-        raise Exception("registerCustomer failed: Server xətası")
+        raise Exception("registerCustomer failed: Nömrənin aktivasiyası zamanı xəta baş verdi")
 
     return j
 
@@ -274,12 +285,10 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
         if stop_ev.is_set():
             return
 
-        # Step 0 — Login
         log(0, "Connecting to Dealer Online...")
         session = create_session(base_url, username, password)
         log(0, "Session created", "success")
 
-        # Step 1 — Check MHM  (+  voucher check for Prepaid)
         log(1, "Validating document & MHM check...")
         check_mhm(session, base_url, data)
 
@@ -288,11 +297,9 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
             if not voucher:
                 raise Exception("checkMHM: Prepaid aktivasiya üçün vauçer tələb olunur")
             add_voucher(session, base_url, voucher, data["MSISDN"], data["SIMCARD"])
-            # success → silent, just continue to Register
 
         log(1, "MHM check passed", "success")
 
-        # Step 2 — Register
         log(2, "Registering customer...")
         register_customer(session, base_url, data, consts)
         log(2, "Registration complete", "success", done=True)
@@ -304,19 +311,16 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
     except Exception as e:
         raw = str(e)
 
-        # Determine which step raised the error — order matters: most specific first
         if "registerCustomer" in raw:
             step_idx = 2
         elif "checkMHM" in raw or "addVoucher" in raw:
             step_idx = 1
-        elif "SESSION" in raw or "session invalid" in raw.lower() or "Login failed" in raw:
+        elif "Login failed" in raw or "SESSION" in raw or "session invalid" in raw.lower() or "Sessiya" in raw:
             step_idx = 0
         else:
             step_idx = 0
 
-        # Clean the raw exception message before sending to the UI
         msg = _clean_error(raw)
-
         log(step_idx, msg, "error", done=True, error=True)
         result_q.put({"MSISDN": msisdn, "PLAN_TYPE": data["PLAN_TYPE"],
                       "TARIFF": data.get("TARIFF", ""),
@@ -324,7 +328,7 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
 
 
 # ══════════════════════════════════════════════════════
-#  MSISDN CARD — live step tracker widget
+#  MSISDN CARD
 # ══════════════════════════════════════════════════════
 class MsisdnCard:
     STEP_ICONS = ["🔐", "🔍", "📝", "🎟️"]
@@ -338,7 +342,6 @@ class MsisdnCard:
                                    border_color=("#3D2260", "#C4B0DC"))
         self._frame.pack(fill="x", padx=6, pady=(0, 8))
 
-        # Header
         hdr = ctk.CTkFrame(self._frame, fg_color="transparent")
         hdr.pack(fill="x", padx=12, pady=(10, 6))
 
@@ -353,13 +356,11 @@ class MsisdnCard:
         ctk.CTkLabel(hdr, text=msisdn,
                      font=("Consolas", 13, "bold"),
                      text_color=("#EDE8F5", "#1A0A2E")).pack(side="left")
-
         ctk.CTkLabel(hdr, text=f"  {plan_type}  ·  {tariff_type}",
                      font=("Segoe UI", 10),
                      text_color=("#8B75B0", "#6B5A8A")).pack(side="left", padx=4)
 
-        self._ts_lbl = ctk.CTkLabel(hdr,
-                                    text=datetime.now().strftime("%H:%M:%S"),
+        self._ts_lbl = ctk.CTkLabel(hdr, text=datetime.now().strftime("%H:%M:%S"),
                                     font=("Consolas", 10),
                                     text_color=("#8B75B0", "#6B5A8A"))
         self._ts_lbl.pack(side="right")
@@ -370,7 +371,6 @@ class MsisdnCard:
                                    fg_color=("#1C1030", "#FFFFFF"), corner_radius=6)
         self._badge.pack(side="right", padx=(0, 8))
 
-        # Step progress
         steps_row = ctk.CTkFrame(self._frame, fg_color="transparent")
         steps_row.pack(fill="x", padx=14, pady=(0, 4))
 
@@ -378,30 +378,20 @@ class MsisdnCard:
         for i, name in enumerate(self._steps):
             sf = ctk.CTkFrame(steps_row, fg_color="transparent")
             sf.pack(side="left")
-
             icon_char = self.STEP_ICONS[i] if i < len(self.STEP_ICONS) else "▸"
-            icon = ctk.CTkLabel(sf, text=icon_char,
-                                font=("Segoe UI", 12),
+            icon = ctk.CTkLabel(sf, text=icon_char, font=("Segoe UI", 12),
                                 text_color=("#8B75B0", "#6B5A8A"))
             icon.pack(side="left", padx=(0, 2))
-
-            lbl = ctk.CTkLabel(sf, text=name,
-                               font=("Segoe UI", 10),
+            lbl = ctk.CTkLabel(sf, text=name, font=("Segoe UI", 10),
                                text_color=("#8B75B0", "#6B5A8A"))
             lbl.pack(side="left")
-
             if i < len(self._steps) - 1:
-                ctk.CTkLabel(sf, text="  →  ",
-                             font=("Segoe UI", 10),
+                ctk.CTkLabel(sf, text="  →  ", font=("Segoe UI", 10),
                              text_color=("#3D2260", "#C4B0DC")).pack(side="left")
-
             self._step_widgets.append((icon, lbl, icon_char))
 
-        # Detail line
-        self._detail = ctk.CTkLabel(self._frame, text="",
-                                    font=("Consolas", 14),
-                                    text_color=("#8B75B0", "#6B5A8A"),
-                                    anchor="w")
+        self._detail = ctk.CTkLabel(self._frame, text="", font=("Consolas", 14),
+                                    text_color=("#8B75B0", "#6B5A8A"), anchor="w")
         self._detail.pack(fill="x", padx=14, pady=(0, 10))
 
     def update_step(self, step_idx, msg, level, done=False, error=False):
@@ -411,10 +401,10 @@ class MsisdnCard:
                 lbl.configure(text_color=("#22C55E", "#16A34A"))
             elif i == step_idx:
                 if error:
-                    icon.configure(text="✗",  text_color=("#EF4444", "#DC2626"))
+                    icon.configure(text="✗", text_color=("#EF4444", "#DC2626"))
                     lbl.configure(text_color=("#EF4444", "#DC2626"))
                 elif done:
-                    icon.configure(text="✓",  text_color=("#22C55E", "#16A34A"))
+                    icon.configure(text="✓", text_color=("#22C55E", "#16A34A"))
                     lbl.configure(text_color=("#22C55E", "#16A34A"))
                 else:
                     icon.configure(text=icon_char, text_color=("#F59E0B", "#D97706"))
@@ -461,9 +451,6 @@ class TabActivation:
         self._cards: dict = {}
         self._build()
 
-    # ══════════════════════════════════════════════════
-    #  BUILD
-    # ══════════════════════════════════════════════════
     def _build(self):
         T   = self._T
         tab = self._tab
@@ -471,7 +458,6 @@ class TabActivation:
         tab.columnconfigure(1, weight=5)
         tab.rowconfigure(0, weight=1)
 
-        # Left config panel
         left = ctk.CTkScrollableFrame(
             tab, fg_color=("#1C1030", "#FFFFFF"), corner_radius=14,
             scrollbar_button_color=("#3D2260", "#C4B0DC"),
@@ -539,14 +525,12 @@ class TabActivation:
             command=self.clear_log
         ).pack(fill="x")
 
-        # Right panel
         right = ctk.CTkFrame(tab, fg_color="transparent")
         right.grid(row=0, column=1, sticky="nsew")
         right.rowconfigure(1, weight=2)
         right.rowconfigure(3, weight=3)
         right.columnconfigure(0, weight=1)
 
-        # Test data header
         th = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12, height=52)
         th.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         th.pack_propagate(False)
@@ -568,7 +552,6 @@ class TabActivation:
                       hover_color=("#7C6EB0", "#7C6EB0"), corner_radius=8,
                       command=self._open_add).pack(side="right", padx=6, pady=10)
 
-        # Test data table
         self._data_box = ctk.CTkTextbox(
             right, font=FONT_MONO_S, fg_color=("#1C1030", "#FFFFFF"),
             text_color=("#EDE8F5", "#1A0A2E"), border_color=("#3D2260", "#C4B0DC"),
@@ -577,7 +560,6 @@ class TabActivation:
         self._data_box.bind("<Button-1>", self._on_row_click)
         self._render_data()
 
-        # Live console header
         ch = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12, height=52)
         ch.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         ch.pack_propagate(False)
@@ -588,7 +570,6 @@ class TabActivation:
         self._res_summary = mk_label(ch, "—", color=C["muted"], font=FONT_MONO_S)
         self._res_summary.pack(side="right", padx=10)
 
-        # Live console scroll area
         self._console = ctk.CTkScrollableFrame(
             right, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12,
             border_width=1, border_color=("#3D2260", "#C4B0DC"),
@@ -599,7 +580,6 @@ class TabActivation:
 
         self._show_placeholder()
 
-        # Load saved state and bind autosave
         self._load_state()
         for w in [self._cred_user, self._cred_pass,
                   self._c_ph1p, self._c_ph1n, self._c_email]:
@@ -631,6 +611,9 @@ class TabActivation:
         if s.get("test_data"):
             self._test_data = s["test_data"]
             self._render_data()
+        # FIX 1: history-i yüklə
+        if s.get("history"):
+            self._history = s["history"]
 
     def _autosave(self, *_):
         save_state("activation", {
@@ -641,6 +624,7 @@ class TabActivation:
             "email":     self._c_email.get(),
             "mode":      self._thread_var.get(),
             "test_data": self._test_data,
+            "history":   self._history,  # FIX 2: history-i saxla
         })
 
     # ══════════════════════════════════════════════════
@@ -677,26 +661,19 @@ class TabActivation:
         ]:
             sf = ctk.CTkFrame(stats, fg_color=("#120A1E", "#F3F0F8"), corner_radius=8)
             sf.pack(side="left", padx=4, pady=8)
-            ctk.CTkLabel(sf, text=val,
-                         font=("Segoe UI", 18, "bold"),
+            ctk.CTkLabel(sf, text=val, font=("Segoe UI", 18, "bold"),
                          text_color=col).pack(padx=14, pady=(6, 0))
-            ctk.CTkLabel(sf, text=lbl,
-                         font=("Segoe UI", 9),
+            ctk.CTkLabel(sf, text=lbl, font=("Segoe UI", 9),
                          text_color=("#8B75B0", "#6B5A8A")).pack(padx=14, pady=(0, 6))
 
         col_hdr = ctk.CTkFrame(self._console, fg_color=("#251540", "#EDE8F5"), corner_radius=8)
         col_hdr.pack(fill="x", padx=6, pady=(0, 4))
         for txt, w in [("#", 32), ("MSISDN", 120), ("Plan", 90),
                        ("Type", 90), ("Status", 110), ("Note", 0)]:
-            ctk.CTkLabel(col_hdr, text=txt,
-                         font=("Segoe UI", 10, "bold"),
-                         text_color=("#8B75B0", "#6B5A8A"),
-                         width=w or 0, anchor="w"
-                         ).pack(side="left",
-                                padx=(12 if txt == "#" else 4, 4),
-                                pady=7,
-                                fill="x" if not w else None,
-                                expand=(not w))
+            ctk.CTkLabel(col_hdr, text=txt, font=("Segoe UI", 10, "bold"),
+                         text_color=("#8B75B0", "#6B5A8A"), width=w or 0, anchor="w"
+                         ).pack(side="left", padx=(12 if txt == "#" else 4, 4), pady=7,
+                                fill="x" if not w else None, expand=(not w))
 
         for i, r in enumerate(self._results, 1):
             ok     = r["STATUS"] == "PASSED"
@@ -719,8 +696,7 @@ class TabActivation:
             ctk.CTkLabel(rc, text=r["TARIFF_TYPE"], font=("Segoe UI", 11),
                          text_color=("#8B75B0", "#6B5A8A"), width=90, anchor="w"
                          ).pack(side="left", padx=4, pady=9)
-            ctk.CTkLabel(rc,
-                         text="  ✅ PASSED  " if ok else "  ❌ FAILED  ",
+            ctk.CTkLabel(rc, text="  ✅ PASSED  " if ok else "  ❌ FAILED  ",
                          font=("Segoe UI", 10, "bold"),
                          text_color=("#22C55E", "#16A34A") if ok else C["error"],
                          fg_color=("#1C1030", "#FFFFFF"), corner_radius=6
@@ -784,11 +760,12 @@ class TabActivation:
         threading.Thread(target=worker, daemon=True).start()
 
     def _force_done(self):
+        # FIX 3: on_done() çağır ki history düşsün və JSON-a yazılsın
         self._running = False
         self._run_btn.configure(state="normal")
         self._cancel_btn.configure(state="disabled")
         if self._results:
-            self._show_summary()
+            self.on_done()
 
     def _on_cancel(self):
         self._stop_ev.set()
@@ -823,10 +800,13 @@ class TabActivation:
         passed = sum(1 for r in self._results if r["STATUS"] == "PASSED")
         failed = sum(1 for r in self._results if r["STATUS"] == "FAILED")
         for r in self._results:
-            entry = dict(r)
-            entry["TIME"] = datetime.now().strftime("%H:%M:%S")
-            self._history.append(entry)
+            if r.get("STATUS") == "PASSED":
+                entry = dict(r)
+                entry["TIME"] = datetime.now().strftime("%H:%M:%S")
+                self._history.append(entry)
         self._show_summary()
+        # FIX 4: history-i dərhal JSON-a yaz
+        self._autosave()
         return passed, failed
 
     def append_log(self, ts, msg, level, msisdn=None, **kw):
@@ -867,53 +847,42 @@ class TabActivation:
 
         col0 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col0.grid(row=1, column=0, sticky="nsew", padx=(12, 5), pady=(0, 12))
-        ctk.CTkLabel(col0, text="📱  MSISDN",
-                     font=("Segoe UI", 10, "bold"),
-                     text_color=("#8B75B0", "#6B5A8A")
-                     ).pack(anchor="w", padx=12, pady=(8, 3))
+        ctk.CTkLabel(col0, text="📱  MSISDN", font=("Segoe UI", 10, "bold"),
+                     text_color=("#8B75B0", "#6B5A8A")).pack(anchor="w", padx=12, pady=(8, 3))
         self._hist_msisdn_var = ctk.StringVar()
-        ctk.CTkEntry(
-            col0,
-            textvariable=self._hist_msisdn_var,
-            placeholder_text="Type to search...",
-            fg_color=("#1C1030", "#FFFFFF"),
-            border_color=("#3D2260", "#C4B0DC"),
-            text_color=("#EDE8F5", "#1A0A2E"),
-            placeholder_text_color=("#3D2260", "#C4B0DC"),
-            font=("Consolas", 12), height=36, corner_radius=8
-        ).pack(fill="x", padx=12, pady=(0, 10))
+        ctk.CTkEntry(col0, textvariable=self._hist_msisdn_var,
+                     placeholder_text="Type to search...",
+                     fg_color=("#1C1030", "#FFFFFF"), border_color=("#3D2260", "#C4B0DC"),
+                     text_color=("#EDE8F5", "#1A0A2E"),
+                     placeholder_text_color=("#3D2260", "#C4B0DC"),
+                     font=("Consolas", 12), height=36, corner_radius=8
+                     ).pack(fill="x", padx=12, pady=(0, 10))
         self._hist_msisdn_var.trace_add("write", lambda *_: self._hist_refresh())
 
         col1 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col1.grid(row=1, column=1, sticky="nsew", padx=5, pady=(0, 12))
-        ctk.CTkLabel(col1, text="📋  TARIFF",
-                     font=("Segoe UI", 10, "bold"),
-                     text_color=("#8B75B0", "#6B5A8A")
-                     ).pack(anchor="w", padx=12, pady=(8, 3))
+        ctk.CTkLabel(col1, text="📋  TARIFF", font=("Segoe UI", 10, "bold"),
+                     text_color=("#8B75B0", "#6B5A8A")).pack(anchor="w", padx=12, pady=(8, 3))
         self._hist_tariff_var = ctk.StringVar(value="All Tariffs")
-        ctk.CTkOptionMenu(
-            col1,
-            values=["All Tariffs"] + list(TARIFF_RCODE_MAP.values()),
-            variable=self._hist_tariff_var,
-            font=("Segoe UI", 11),
-            fg_color=("#1C1030", "#FFFFFF"),
-            button_color=("#5C2483", "#5C2483"),
-            button_hover_color=("#7C6EB0", "#7C6EB0"),
-            dropdown_fg_color=("#1C1030", "#FFFFFF"),
-            text_color=("#EDE8F5", "#1A0A2E"),
-            dropdown_text_color="#EDE8F5",
-            dropdown_hover_color="#3D2260",
-            height=36, corner_radius=8,
-            command=lambda _: self._hist_refresh()
-        ).pack(fill="x", padx=12, pady=(0, 10))
+        # FIX 5: Prepaid tarifləri də filtrdə var
+        all_tariffs = (["All Tariffs"]
+                       + list(TARIFF_RCODE_MAP.values())
+                       + list(PREPAID_TARIFF_MAP.values()))
+        ctk.CTkOptionMenu(col1, values=all_tariffs, variable=self._hist_tariff_var,
+                          font=("Segoe UI", 11), fg_color=("#1C1030", "#FFFFFF"),
+                          button_color=("#5C2483", "#5C2483"),
+                          button_hover_color=("#7C6EB0", "#7C6EB0"),
+                          dropdown_fg_color=("#1C1030", "#FFFFFF"),
+                          text_color=("#EDE8F5", "#1A0A2E"),
+                          dropdown_text_color="#EDE8F5", dropdown_hover_color="#3D2260",
+                          height=36, corner_radius=8,
+                          command=lambda _: self._hist_refresh()
+                          ).pack(fill="x", padx=12, pady=(0, 10))
 
         col2 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col2.grid(row=1, column=2, sticky="nsew", padx=(5, 12), pady=(0, 12))
-
-        ctk.CTkLabel(col2, text="💳  PLAN TYPE",
-                     font=("Segoe UI", 10, "bold"),
-                     text_color=("#8B75B0", "#6B5A8A")
-                     ).pack(anchor="w", padx=12, pady=(8, 3))
+        ctk.CTkLabel(col2, text="💳  PLAN TYPE", font=("Segoe UI", 10, "bold"),
+                     text_color=("#8B75B0", "#6B5A8A")).pack(anchor="w", padx=12, pady=(8, 3))
         plan_row = ctk.CTkFrame(col2, fg_color="transparent")
         plan_row.pack(fill="x", padx=12, pady=(0, 6))
         plan_row.columnconfigure((0, 1, 2), weight=1)
@@ -924,8 +893,7 @@ class TabActivation:
                 plan_row, text=lbl, height=28,
                 font=("Segoe UI", 10, "bold"), corner_radius=7,
                 fg_color=("#5C2483", "#5C2483") if val == "All" else ("#3D2260", "#C4B0DC"),
-                hover_color=("#7C6EB0", "#7C6EB0"),
-                text_color="white",
+                hover_color=("#7C6EB0", "#7C6EB0"), text_color="white",
                 command=lambda v=val: self._set_plan_chip(v))
             b.grid(row=0, column=col_idx, padx=(0, 3) if col_idx < 2 else 0, sticky="ew")
             self._plan_btns[val] = b
@@ -934,9 +902,9 @@ class TabActivation:
                                             corner_radius=10, height=36)
         self._hist_stats_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
         self._hist_stats_bar.pack_propagate(False)
-        self._hist_stats_lbl = ctk.CTkLabel(
-            self._hist_stats_bar, text="",
-            font=("Segoe UI", 11), text_color=("#8B75B0", "#6B5A8A"))
+        self._hist_stats_lbl = ctk.CTkLabel(self._hist_stats_bar, text="",
+                                            font=("Segoe UI", 11),
+                                            text_color=("#8B75B0", "#6B5A8A"))
         self._hist_stats_lbl.pack(side="left", padx=14)
 
         col_hdr = ctk.CTkFrame(parent, fg_color=("#251540", "#EDE8F5"),
@@ -945,15 +913,10 @@ class TabActivation:
         col_hdr.pack_propagate(False)
         for txt, w in [("#", 32), ("Time", 72), ("MSISDN", 120),
                        ("Plan", 88), ("Tariff", 130), ("Status", 108), ("Note", 0)]:
-            ctk.CTkLabel(col_hdr, text=txt,
-                         font=("Segoe UI", 10, "bold"),
-                         text_color=("#8B75B0", "#6B5A8A"),
-                         width=w or 0, anchor="w"
-                         ).pack(side="left",
-                                padx=(12 if txt == "#" else 4, 4),
-                                pady=7,
-                                fill="x" if not w else None,
-                                expand=(not w))
+            ctk.CTkLabel(col_hdr, text=txt, font=("Segoe UI", 10, "bold"),
+                         text_color=("#8B75B0", "#6B5A8A"), width=w or 0, anchor="w"
+                         ).pack(side="left", padx=(12 if txt == "#" else 4, 4), pady=7,
+                                fill="x" if not w else None, expand=(not w))
 
         self._hist_scroll = ctk.CTkScrollableFrame(
             parent, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12,
@@ -989,19 +952,18 @@ class TabActivation:
         msisdn_q = self._hist_msisdn_var.get().strip() if hasattr(self, "_hist_msisdn_var") else ""
         tariff_q = self._hist_tariff_var.get()         if hasattr(self, "_hist_tariff_var") else "All Tariffs"
         plan_q   = self._hist_plan_var.get()           if hasattr(self, "_hist_plan_var")   else "All"
-        status_q = "PASSED"
 
         rows = list(self._history)
 
         if msisdn_q:
             rows = [r for r in rows if msisdn_q in r.get("MSISDN", "")]
         if tariff_q != "All Tariffs":
+            # FIX 6: həm PostPaid həm Prepaid düzgün filtr olunur
             rows = [r for r in rows
-                    if TARIFF_RCODE_MAP.get(r.get("TARIFF", ""), "") == tariff_q]
+                    if TARIFF_RCODE_MAP.get(r.get("TARIFF", ""), "") == tariff_q
+                    or PREPAID_TARIFF_MAP.get(r.get("TARIFF", ""), "") == tariff_q]
         if plan_q != "All":
             rows = [r for r in rows if r.get("PLAN_TYPE", "") == plan_q]
-        if status_q != "All":
-            rows = [r for r in rows if r.get("STATUS", "") == status_q]
 
         total  = len(rows)
         passed = sum(1 for r in rows if r.get("STATUS") == "PASSED")
@@ -1011,8 +973,7 @@ class TabActivation:
                 text=f"  {total} record{'s' if total != 1 else ''}  ·  ✅ {passed}  ·  ❌ {failed}")
 
         if not rows:
-            ctk.CTkLabel(self._hist_scroll,
-                         text=T("hist_empty"),
+            ctk.CTkLabel(self._hist_scroll, text=T("hist_empty"),
                          font=("Segoe UI", 12),
                          text_color=("#8B75B0", "#6B5A8A")).pack(pady=32)
             return
@@ -1038,12 +999,15 @@ class TabActivation:
             ctk.CTkLabel(rc, text=r.get("PLAN_TYPE", "—"), font=("Segoe UI", 11),
                          text_color=("#8B75B0", "#6B5A8A"), width=88, anchor="w"
                          ).pack(side="left", padx=4, pady=8)
-            tariff_display = TARIFF_RCODE_MAP.get(r.get("TARIFF", ""), r.get("TARIFF_TYPE", "—"))
+            # FIX 7: Prepaid tariff adını da düzgün göstər
+            tariff_code = r.get("TARIFF", "")
+            tariff_display = (TARIFF_RCODE_MAP.get(tariff_code)
+                              or PREPAID_TARIFF_MAP.get(tariff_code)
+                              or r.get("TARIFF_TYPE", "—"))
             ctk.CTkLabel(rc, text=tariff_display, font=("Segoe UI", 11),
                          text_color=("#8B75B0", "#6B5A8A"), width=130, anchor="w"
                          ).pack(side="left", padx=4, pady=8)
-            ctk.CTkLabel(rc,
-                         text="  ✅ PASSED  " if ok else "  ❌ FAILED  ",
+            ctk.CTkLabel(rc, text="  ✅ PASSED  " if ok else "  ❌ FAILED  ",
                          font=("Segoe UI", 10, "bold"),
                          text_color=("#22C55E", "#16A34A") if ok else "#EF4444",
                          fg_color=("#1C1030", "#FFFFFF"), corner_radius=6

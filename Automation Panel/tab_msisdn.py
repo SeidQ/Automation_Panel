@@ -318,10 +318,10 @@ class TabMSISDN:
             return C["muted"], C["input"]
         if key == "status":
             _, col = STATUS_MAP.get(val, (None, C["muted"]))
-            return col, col + "22" if col.startswith("#") else C["input"]
+            return col, C["input"]
         if key == "simCardStatus":
             _, col = SIM_STATUS_MAP.get(val, (None, C["muted"]))
-            return col, col + "22" if col.startswith("#") else C["input"]
+            return col, C["input"]
         if key in ("pin1", "pin2", "puk1", "puk2"):
             return C["warning"], C["input"]
         if key in ("price", "finalPrice", "reservationFee", "activationFee"):
