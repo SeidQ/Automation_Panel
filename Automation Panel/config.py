@@ -125,7 +125,7 @@ STRINGS = {
         "light_mode":      "☀️ Light",
         "dark_mode":       "🌙 Dark",
         "msisdn_title":    "🔍  MSISDN NUMBER LOOKUP",
-        "msisdn_enter":    "Enter MSISDN number",
+        "msisdn_enter":    "Enter MSISDN/ICCID number",
         "msisdn_search":   "  🔍  Search  ",
         "msisdn_clear":    "🗑  Clear",
         "msisdn_result":   "📊  NUMBER DETAILS",

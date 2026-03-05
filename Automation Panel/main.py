@@ -290,6 +290,8 @@ class App(ctk.CTk):
                     self._tab_act.collect_result(r)
         except queue.Empty:
             pass
+
+        self.after(80, self._poll)
     # ══════════════════════════════════════════════════
     #  STATUS BAR
     # ══════════════════════════════════════════════════

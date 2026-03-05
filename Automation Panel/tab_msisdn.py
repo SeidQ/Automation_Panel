@@ -2,6 +2,7 @@
 tab_msisdn.py — Tab 3: MSISDN Details (SFA API)
 """
 import threading
+import tkinter as tk
 import requests
 import customtkinter as ctk
 
@@ -17,6 +18,11 @@ SFA_AUTH     = "Basic bmV3Y3VzdG9tZXI6cmVtb3RzdWN3ZW4="
 # ══════════════════════════════════════════════════════
 #  API
 # ══════════════════════════════════════════════════════
+def _is_simcard_number(value: str) -> bool:
+    """Heuristic: SIM/ICC numbers are typically 18-22 digits long."""
+    return value.isdigit() and 18 <= len(value) <= 22
+
+
 def fetch_msisdn_details(msisdn):
     """Returns (data_dict, None) on success or (None, error_str) on failure."""
     try:
@@ -41,6 +47,45 @@ def fetch_msisdn_details(msisdn):
         return None, str(e)
 
 
+def fetch_simcard_details(number):
+    """Fetch SIM card details by ICC number. Returns (data_dict, None) or (None, error_str)."""
+    try:
+        r = requests.get(
+            f"{SFA_BASE_URL}/simcard",
+            params={"number": number.strip()},
+            headers={"Authorization": SFA_AUTH,
+                     "Accept": "application/json",
+                     "User-Agent": "AzercellAutomationPanel/5.0"},
+            timeout=15,
+        )
+        if r.status_code == 404:
+            return None, f"SIM card not found: {number}"
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}: {r.text[:200]}"
+        return r.json(), None
+    except requests.exceptions.ConnectionError:
+        return None, "Connection error — check network / VPN access to SFA API"
+    except requests.exceptions.Timeout:
+        return None, "Request timed out (15 s)"
+    except Exception as e:
+        return None, str(e)
+
+
+def fetch_auto(query: str):
+    """
+    Auto-detect input type:
+      • 18-22 digit string  →  SIM card lookup
+      • anything else       →  MSISDN lookup
+    Returns (data_dict, None, source_label) or (None, error_str, source_label).
+    """
+    if _is_simcard_number(query):
+        data, err = fetch_simcard_details(query)
+        return data, err, "SIM"
+    else:
+        data, err = fetch_msisdn_details(query)
+        return data, err, "MSISDN"
+
+
 # ══════════════════════════════════════════════════════
 #  TAB 3 UI CLASS
 # ══════════════════════════════════════════════════════
@@ -54,9 +99,10 @@ class TabMSISDN:
             "security": 2, "financial": 2, "misc": 2}
 
     def __init__(self, tab, T):
-        self._tab  = tab
-        self._T    = T
-        self._data = None
+        self._tab    = tab
+        self._T      = T
+        self._data   = None
+        self._source = None   # "MSISDN" or "SIM"
         self._build()
 
     # ── Build ──────────────────────────────────────────
@@ -146,34 +192,36 @@ class TabMSISDN:
 
     # ── Search ────────────────────────────────────────
     def do_search(self):
-        msisdn = self._entry.get().strip()
-        if not msisdn:
+        query = self._entry.get().strip()
+        if not query:
             return
         self._search_btn.configure(state="disabled", text="⏳")
         self._show_loading()
 
         def worker():
-            data, err = fetch_msisdn_details(msisdn)
-            self._tab.after(0, lambda: self._on_result(data, err))
+            data, err, source = fetch_auto(query)
+            self._tab.after(0, lambda: self._on_result(data, err, source))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_result(self, data, err):
+    def _on_result(self, data, err, source):
         self._search_btn.configure(state="normal",
                                    text=self._T("msisdn_search"))
         if err:
             self._show_error(err)
         else:
-            self._data = data
-            self.render(data)
+            self._data   = data
+            self._source = source
+            self.render(data, source)
 
     def clear(self):
         self._entry.delete(0, "end")
-        self._data = None
+        self._data   = None
+        self._source = None
         self._show_placeholder()
 
     # ── Render ────────────────────────────────────────
-    def render(self, data):
+    def render(self, data, source="MSISDN"):
         """Render JSON response as grouped hero + cards."""
         self._clear_results()
 
@@ -185,10 +233,21 @@ class TabMSISDN:
 
         lh = ctk.CTkFrame(hero, fg_color="transparent")
         lh.pack(side="left", padx=24, pady=16)
-        ctk.CTkLabel(lh, text="📱", font=("Segoe UI", 32)).pack()
-        ctk.CTkLabel(lh, text=str(data.get("msisdn", "—")),
-                     font=("Consolas", 26, "bold"), text_color="white").pack()
-        ctk.CTkLabel(lh, text="MSISDN",
+
+        # Icon & primary identifier based on source
+        if source == "SIM":
+            icon      = "💳"
+            id_value  = str(data.get("number", data.get("iccid", data.get("simNumber", "—"))))
+            id_label  = "SIM / ICC"
+        else:
+            icon      = "📱"
+            id_value  = str(data.get("msisdn", "—"))
+            id_label  = "MSISDN"
+
+        ctk.CTkLabel(lh, text=icon, font=("Segoe UI", 32)).pack()
+        ctk.CTkLabel(lh, text=id_value,
+                     font=("Consolas", 22, "bold"), text_color="white").pack()
+        ctk.CTkLabel(lh, text=id_label,
                      font=("Segoe UI", 10), text_color="#C4B0DC").pack()
 
         ctk.CTkFrame(hero, fg_color="#7C3DAB", width=1
@@ -198,11 +257,11 @@ class TabMSISDN:
         pills.pack(side="left", padx=10, pady=16)
 
         s_lbl, s_col = STATUS_MAP.get(
-            data.get("status"), (str(data.get("status")), C["muted"]))
-        self._pill(pills, "Status",  s_lbl, s_col)
+            data.get("status"), (str(data.get("status", "—")), C["muted"]))
+        self._pill(pills, "Status", s_lbl, s_col)
 
         ss_lbl, ss_col = SIM_STATUS_MAP.get(
-            data.get("simCardStatus"), (str(data.get("simCardStatus")), C["muted"]))
+            data.get("simCardStatus"), (str(data.get("simCardStatus", "—")), C["muted"]))
         self._pill(pills, "SIM", ss_lbl, ss_col)
 
         pay = PAYMENT_MAP.get(data.get("paymentPlan"),
@@ -222,6 +281,12 @@ class TabMSISDN:
                      text=(f"🏷️ v{data.get('version', '—')}  |  "
                            f"Segment {data.get('segmentType', '—')}"),
                      font=("Segoe UI", 10), text_color="#C4B0DC").pack(anchor="e", pady=(4, 0))
+
+        # Source badge (MSISDN vs SIM)
+        badge_color = C["accent"] if source == "SIM" else C["success"]
+        ctk.CTkLabel(rh, text=f"🔎 {source}",
+                     font=("Segoe UI", 9, "bold"),
+                     text_color=badge_color).pack(anchor="e", pady=(6, 0))
 
         # ── Group cards ──────────────────────────
         group_data = {g: {} for g in self._COL}
@@ -268,17 +333,25 @@ class TabMSISDN:
                              width=160, anchor="w").pack(side="left")
                 vf = ctk.CTkFrame(rf, fg_color=bg_col, corner_radius=6)
                 vf.pack(side="left", fill="x", expand=True, pady=1)
-                ctk.CTkLabel(vf, text=display, font=("Consolas", 11),
-                             text_color=txt_col, anchor="w"
-                             ).pack(side="left", padx=8, pady=3)
-                ctk.CTkButton(vf, text="⎘", width=28, height=22,
-                              font=("Segoe UI", 11), fg_color="transparent",
-                              hover_color=C["border"], text_color=C["muted"],
-                              corner_radius=6,
-                              command=lambda v=display: (
-                                  self._tab.clipboard_clear(),
-                                  self._tab.clipboard_append(v)
-                              )).pack(side="right", padx=4, pady=2)
+
+                val_txt = tk.Text(
+                    vf,
+                    font=FONT_MONO_S,
+                    fg=txt_col,
+                    bg=bg_col,
+                    selectbackground="#4A90D9",
+                    selectforeground="white",
+                    relief="flat",
+                    bd=0,
+                    highlightthickness=0,
+                    height=1,
+                    width=len(display),
+                    wrap="none",
+                    cursor="xterm",
+                )
+                val_txt.insert("1.0", display)
+                val_txt.configure(state="disabled")
+                val_txt.pack(side="left", padx=8, pady=4)
 
             ctk.CTkFrame(card, fg_color="transparent", height=8).pack()
 
@@ -342,9 +415,10 @@ class TabMSISDN:
             w.destroy()
         self._build()
         if self._data:
-            self.render(self._data)
+            self.render(self._data, self._source or "MSISDN")
 
-    def restore(self, data):
+    def restore(self, data, source="MSISDN"):
         if data:
-            self._data = data
-            self.render(data)
+            self._data   = data
+            self._source = source
+            self.render(data, source)

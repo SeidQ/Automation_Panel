@@ -368,9 +368,9 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
     # ── Trigger ──────────────────────────────────────
     trigger = ctk.CTkFrame(
         parent_row,
-        fg_color=("#251540", "#EDE8F5"),
+        fg_color="#251540",
         corner_radius=8, border_width=1,
-        border_color=("#5C2483", "#5C2483"),
+        border_color="#5C2483",
         cursor="hand2", height=36)
     trigger.pack(side="left", fill="x", expand=True)
     trigger.pack_propagate(False)
@@ -378,7 +378,7 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
     lbl = ctk.CTkLabel(
         trigger, text=f"  {val}",
         font=FONT_MONO_S, anchor="w",
-        text_color=("#EDE8F5", "#1A0A2E"))
+        text_color="#EDE8F5")
     lbl.pack(side="left", fill="x", expand=True, padx=(4, 0), pady=4)
 
     arr = ctk.CTkLabel(
@@ -412,7 +412,7 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
         ry = trigger.winfo_rooty() + trigger.winfo_height()
         tw = trigger.winfo_width()
 
-        item_h   = 30
+        item_h   = 24
         max_show = 6
         n        = len(values)
         list_h   = item_h * min(n, max_show) + 8
@@ -457,10 +457,10 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
 
             btn = tk.Button(
                 container, text=f"  {v}",
-                font=("Consolas", 11),
-                bg=fg_btn, fg=fg_text,
+                font=("Consolas", 10),
+                bg=fg_btn, fg="white",
                 activebackground="#3D2260", activeforeground="white",
-                relief="flat", anchor="w", bd=0, padx=6, pady=4,
+                relief="flat", anchor="w", bd=0, padx=4, pady=2,
                 cursor="hand2",
                 command=lambda v=v: _select(v))
             btn.pack(fill="x", pady=1, padx=2)
@@ -473,7 +473,16 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
             btn.bind("<Leave>", _on_leave)
 
         # Close when clicking outside
-        popup.bind("<FocusOut>", lambda e: _close())
+        def _on_popup_leave(e):
+            px = popup.winfo_rootx()
+            py = popup.winfo_rooty()
+            pw = popup.winfo_width()
+            ph = popup.winfo_height()
+            mx = popup.winfo_pointerx()
+            my = popup.winfo_pointery()
+            if not (px <= mx <= px + pw and py <= my <= py + ph):
+                _close()
+        popup.bind("<Leave>", _on_popup_leave)
 
         _popup[0] = popup
         arr.configure(text="▴")
