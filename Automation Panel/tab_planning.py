@@ -207,10 +207,12 @@ def run_number_planning(cfg, log_q, stop_ev):
         log("📋 Navigating to Number Planning...")
         wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//li[@routerlink='/planning']"))).click()
+        if stop_ev.is_set(): return
         wait.until(EC.element_to_be_clickable(
             (By.XPATH, "(//div[@class='mat-radio-label-content'])[2]"))).click()
         log("  ✓ 'Preparing for resold' selected.")
 
+        if stop_ev.is_set(): return
         fi = wait.until(EC.presence_of_element_located(
             (By.XPATH, "//input[@id='fileInput']")))
         driver.execute_script("arguments[0].style.display='block';", fi)
@@ -938,10 +940,14 @@ class TabPlanning:
                     "level": "success", "_tab": "np"})
 
             except Exception as e:
-                self._log_q.put({
-                    "ts": datetime.now().strftime("%H:%M:%S"),
-                    "msg": f"═══ ERROR: {e} ═══",
-                    "level": "error", "_tab": "np"})
+                if self._stop_ev.is_set():
+                    # Already handled by _on_cancel — just clean up
+                    pass
+                else:
+                    self._log_q.put({
+                        "ts": datetime.now().strftime("%H:%M:%S"),
+                        "msg": f"═══ ERROR: {e} ═══",
+                        "level": "error", "_tab": "np"})
             finally:
                 self._tab.after(0, self._on_done)
 
@@ -949,19 +955,24 @@ class TabPlanning:
 
     def _on_cancel(self):
         self._stop_ev.set()
-        self._append_log(datetime.now().strftime("%H:%M:%S"),
-                         self._T("cancel_msg"), "error")
+        ts = datetime.now().strftime("%H:%M:%S")
+        self._append_log(ts, self._T("cancel_msg"), "error")
         self._set_status(self._T("cancelled"), C["error"], "#2A0A0A")
         self._cancel_btn.configure(state="disabled")
         self._start_btn.configure(state="normal")
         self._running = False
 
     def _on_done(self):
+        # If user cancelled, don't override the cancelled status
+        if self._stop_ev.is_set():
+            self._running = False
+            self._start_btn.configure(state="normal")
+            self._cancel_btn.configure(state="disabled")
+            return
         self._running = False
         self._start_btn.configure(state="normal")
         self._cancel_btn.configure(state="disabled")
-        if not self._stop_ev.is_set():
-            self._set_status(self._T("success_status"), C["success"], "#0B2210")
+        self._set_status(self._T("success_status"), C["success"], "#0B2210")
 
     def _set_status(self, text, color, bg):
         self._status_lbl.configure(

@@ -332,10 +332,25 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
             if "HTTPConnectionPool" in str(e) or "ConnectionPool" in str(e):
                 raise Exception("VPN bağlantısı yoxdur — dealer-online.azercell.com əlçatmazdır")
             raise
+
+        # Hook: after every HTTP response, raise immediately if cancelled
+        def _cancel_hook(r, *args, **kwargs):
+            if stop_ev.is_set():
+                raise Exception("__CANCELLED__")
+        session.hooks["response"].append(_cancel_hook)
+
+        # ── Check cancel after login ──────────────────
+        if stop_ev.is_set():
+            return
+
         log(0, "Session created", "success")
 
         log(1, "Validating document & MHM check...")
         check_mhm(session, base_url, data)
+
+        # ── Check cancel after MHM ────────────────────
+        if stop_ev.is_set():
+            return
 
         if is_prepaid:
             voucher = data.get("VOUCHER", "").strip()
@@ -343,10 +358,19 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
                 raise Exception("checkMHM: Prepaid aktivasiya üçün vauçer tələb olunur")
             add_voucher(session, base_url, voucher, data["MSISDN"], data["SIMCARD"])
 
+            # ── Check cancel after voucher ────────────
+            if stop_ev.is_set():
+                return
+
         log(1, "MHM check passed", "success")
 
         log(2, "Registering customer...")
         register_customer(session, base_url, data, consts)
+
+        # ── Check cancel after register ───────────────
+        if stop_ev.is_set():
+            return
+
         log(2, "Registration complete", "success", done=True)
 
         result_q.put({"MSISDN": msisdn, "PLAN_TYPE": data["PLAN_TYPE"],
@@ -354,6 +378,10 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
                       "TARIFF_TYPE": tariff_label, "STATUS": "PASSED", "ERROR": ""})
 
     except Exception as e:
+        # If cancelled (either by flag or by our hook), silently discard
+        if stop_ev.is_set() or "__CANCELLED__" in str(e):
+            return
+
         raw = str(e)
 
         if "registerCustomer" in raw:
@@ -950,6 +978,9 @@ class TabActivation:
         threading.Thread(target=worker, daemon=True).start()
 
     def _force_done(self):
+        # If user cancelled, do not override the cancelled state
+        if self._stop_ev.is_set():
+            return
         if self._results:
             self.on_done()
         else:
@@ -962,6 +993,32 @@ class TabActivation:
         self._running = False
         self._run_btn.configure(state="normal")
         self._cancel_btn.configure(state="disabled")
+        # Show cancel message in each running card's detail label
+        for msisdn, card in self._cards.items():
+            # Only update cards that haven't finished yet (no PASSED/FAILED badge)
+            badge_text = card._badge.cget("text")
+            if "RUNNING" in badge_text:
+                card._frame.configure(border_color=("#EF4444", "#DC2626"))
+                card._badge.configure(
+                    text="  🚫 CANCELLED  ",
+                    text_color=("#EF4444", "#DC2626"),
+                    fg_color="#2A0A0A")
+                card._detail.configure(
+                    text="  ↳ Process cancelled by user",
+                    text_color=C["error"])
+        # Also print to console log box if it has any children other than cards
+        ts = datetime.now().strftime("%H:%M:%S")
+        cancel_card = ctk.CTkFrame(
+            self._console,
+            fg_color="#2A0A0A", corner_radius=10,
+            border_width=1, border_color="#EF4444")
+        cancel_card.pack(fill="x", padx=6, pady=(8, 2))
+        ctk.CTkLabel(
+            cancel_card,
+            text=f"🚫  [{ts}]  Process cancelled by user",
+            font=("Segoe UI", 11, "bold"),
+            text_color="#EF4444"
+        ).pack(padx=14, pady=10)
 
     # ══════════════════════════════════════════════════
     #  PUBLIC API

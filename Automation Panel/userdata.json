@@ -152,5 +152,9 @@
         "UPDATE_TARIFF": "normal"
       }
     ]
+  },
+  "window": {
+    "geometry": "1100x845+338+160",
+    "maximized": false
   }
 }

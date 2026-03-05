@@ -26,9 +26,22 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Azercell Automation Panel")
-        self.geometry("1380x880")
         self.minsize(1100, 720)
         self.configure(fg_color=("#120A1E", "#F3F0F8"))
+
+        # ── Restore saved window geometry ─────────────
+        _win = cfg.load_section("window")
+        _restored = False
+        if _win:
+            try:
+                geo = _win.get("geometry", "")
+                if geo:
+                    self.geometry(geo)
+                    _restored = True
+            except Exception:
+                pass
+        if not _restored:
+            self.geometry("1380x880")
 
         # Shared queues & events (survive tab rebuilds)
         self._log_q   = queue.Queue()
@@ -59,6 +72,17 @@ class App(ctk.CTk):
         self._build()
         self._poll()
         self.after(100, self._fix_titlebar)
+
+        # ── Restore maximized state after window is shown ──
+        if _win and _win.get("maximized"):
+            self.after(150, lambda: self.state("zoomed"))
+
+        # ── Save geometry on every move/resize and on close ──
+        self.bind("<Configure>", self._on_configure)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Debounce timer for geometry saves
+        self._geo_save_id = None
 
     # ══════════════════════════════════════════════════
     #  BUILD — called once at startup
@@ -292,6 +316,44 @@ class App(ctk.CTk):
             pass
 
         self.after(80, self._poll)
+    # ══════════════════════════════════════════════════
+    #  WINDOW STATE PERSISTENCE
+    # ══════════════════════════════════════════════════
+    def _save_window_state(self):
+        """Save current geometry and maximized state to userdata.json."""
+        try:
+            is_maximized = self.state() == "zoomed"
+            if is_maximized:
+                # Save only the maximized flag; geometry is from before maximize
+                geo = getattr(self, "_last_normal_geo", self.geometry())
+            else:
+                geo = self.geometry()
+                self._last_normal_geo = geo
+            cfg.save_state("window", {
+                "geometry":  geo,
+                "maximized": is_maximized,
+            })
+        except Exception:
+            pass
+
+    def _on_configure(self, event=None):
+        """Debounced save — fires 600 ms after last resize/move."""
+        # Track normal (non-maximized) geometry
+        try:
+            if self.state() != "zoomed":
+                self._last_normal_geo = self.geometry()
+        except Exception:
+            pass
+        # Cancel previous pending save
+        if self._geo_save_id is not None:
+            self.after_cancel(self._geo_save_id)
+        self._geo_save_id = self.after(600, self._save_window_state)
+
+    def _on_close(self):
+        """Save window state then destroy."""
+        self._save_window_state()
+        self.destroy()
+
     # ══════════════════════════════════════════════════
     #  STATUS BAR
     # ══════════════════════════════════════════════════
