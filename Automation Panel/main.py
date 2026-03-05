@@ -25,7 +25,7 @@ from tab_msisdn      import TabMSISDN
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Azercell Automation Panel")
+        self.title("")
         self.minsize(1100, 720)
         self.configure(fg_color=("#120A1E", "#F3F0F8"))
 
@@ -117,9 +117,9 @@ class App(ctk.CTk):
         if self._logo_img:
             ctk.CTkLabel(tf, image=self._logo_img, text="").pack(
                 side="left", padx=(0, 14))
-            ctk.CTkLabel(tf, text="Automation Panel",
-                         font=("Segoe UI", 19, "bold"),
-                         text_color="#EDE8F5").pack(side="left")
+            ctk.CTkLabel(bar, text="Automation Panel",
+                         font=("Segoe UI", 22, "bold"),
+                         text_color="#EDE8F5").place(relx=0.5, rely=0.5, anchor="center")
         else:
             badge = ctk.CTkFrame(tf, fg_color=("#5C2483", "#5C2483"),
                                  width=36, height=36, corner_radius=8)

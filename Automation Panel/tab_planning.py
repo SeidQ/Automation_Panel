@@ -336,20 +336,33 @@ def _center_on_parent(dlg, parent, w=520, h=580):
     dlg.geometry(f"{w}x{h}+{px+(pw-w)//2}+{py+(ph-h)//2}")
 
 def _style_dialog(dlg):
+    """Dark title bar + app icon. Re-applies icon at multiple delays to
+    override CTk's own after() calls that reset it to the blue default.
+    Also removes the system menu so clicking the icon shows no popup."""
     import os as _os
-    try:
-        _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
-        if _os.path.exists(_ico):
-            dlg.iconbitmap(_ico)
-    except Exception:
-        pass
-    try:
-        from ctypes import windll, byref, sizeof, c_int
-        dlg.update_idletasks()
-        hwnd = windll.user32.GetParent(dlg.winfo_id())
-        windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
-    except Exception:
-        pass
+    _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
+    _ico = _ico if _os.path.exists(_ico) else None
+
+    def _apply():
+        try:
+            if _ico:
+                dlg.iconbitmap(_ico)
+        except Exception:
+            pass
+        try:
+            from ctypes import windll, byref, sizeof, c_int
+            dlg.update_idletasks()
+            hwnd = windll.user32.GetParent(dlg.winfo_id())
+            windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
+
+        except Exception:
+            pass
+
+    # Apply immediately and then beat CTk's delayed icon-reset calls
+    _apply()
+    dlg.after(10,  _apply)
+    dlg.after(100, _apply)
+    dlg.after(300, _apply)
 
 
 # ══════════════════════════════════════════════════════
@@ -737,11 +750,56 @@ class TabPlanning:
         d       = self._data[edit_idx] if is_edit else {}
 
         dlg = ctk.CTkToplevel(self._tab)
-        dlg.title("✎  Edit Row" if is_edit else "＋  Add Row")
+        dlg.title("")
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
-        _center_on_parent(dlg, self._tab, w=520, h=680)
+
+        # ── Restore saved geometry ──
+        _section_key = "np_edit_dialog_window" if is_edit else "np_add_dialog_window"
+        _dlg_win = load_section(_section_key)
+        _dlg_restored = False
+        if _dlg_win:
+            try:
+                _geo = _dlg_win.get("geometry", "")
+                if _geo:
+                    dlg.geometry(_geo)
+                    _dlg_restored = True
+            except Exception:
+                pass
+        if not _dlg_restored:
+            _center_on_parent(dlg, self._tab, w=520, h=680)
+
         _style_dialog(dlg)
+
+        # ── Restore maximized state ──
+        if _dlg_win and _dlg_win.get("maximized"):
+            dlg.after(150, lambda: dlg.state("zoomed"))
+
+        # ── Save geometry on move/resize (debounced 600ms) ──
+        _geo_save_id = [None]
+        _last_normal_geo = [dlg.geometry()]
+
+        def _dlg_save_state():
+            try:
+                is_max = dlg.state() == "zoomed"
+                geo = _last_normal_geo[0] if is_max else dlg.geometry()
+                if not is_max:
+                    _last_normal_geo[0] = geo
+                save_state(_section_key, {"geometry": geo, "maximized": is_max})
+            except Exception:
+                pass
+
+        def _dlg_on_configure(event=None):
+            try:
+                if dlg.state() != "zoomed":
+                    _last_normal_geo[0] = dlg.geometry()
+            except Exception:
+                pass
+            if _geo_save_id[0] is not None:
+                dlg.after_cancel(_geo_save_id[0])
+            _geo_save_id[0] = dlg.after(600, _dlg_save_state)
+
+        dlg.bind("<Configure>", _dlg_on_configure)
 
         hdr_col = "#B45309" if is_edit else "#5C2483"
         dh = ctk.CTkFrame(dlg, fg_color=hdr_col, corner_radius=0, height=52)
@@ -820,10 +878,10 @@ class TabPlanning:
                                    list(_SEGMENT_OPTS.keys()), seg_disp)
         e_price   = _entry_widget(_row("Price (qepik)"),
                                   d.get("PRICE", ""), digits_only=True, max_len=10)
-        pub_def   = "0  (not public)" if d.get("PUBLIC", "0") == "0" else "1  (public)"
-        v_public  = _mk_overlay_dd(_row("Public"),
-                                   dlg,
-                                   ["0  (not public)", "1  (public)"], pub_def)
+        pub_def   = "Not Public" if d.get("PUBLIC", "0") == "0" else "Public"
+        v_public = _mk_overlay_dd(_row("Public"),
+                                  dlg,
+                                  ["Not Public", "Public"], pub_def)
         v_numtype = _mk_overlay_dd(_row("Number Type"),
                                    dlg,
                                    ["EXTERNAL", "INTERNAL", "GOLDEN"],
@@ -849,7 +907,7 @@ class TabPlanning:
                 "USAGE":         v_usage.get(),
                 "SEGMENT":       _SEGMENT_OPTS.get(v_seg.get(), "2"),
                 "PRICE":         e_price.get().strip(),
-                "PUBLIC":        v_public.get().split()[0],
+                "PUBLIC":        "0" if v_public.get() == "Not Public" else "1",
                 "NUMBER_TYPE":   v_numtype.get(),
                 "DESCRIPTION":   e_desc.get().strip(),
                 "UPDATE_TARIFF": v_tariff.get(),

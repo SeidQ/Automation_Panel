@@ -154,7 +154,19 @@
     ]
   },
   "window": {
-    "geometry": "1100x845+338+160",
+    "geometry": "1536x793+-28+27",
+    "maximized": true
+  },
+  "np_add_dialog_window": {
+    "geometry": "520x680+364+25",
+    "maximized": false
+  },
+  "np_edit_dialog_window": {
+    "geometry": "520x680+439+51",
+    "maximized": false
+  },
+  "add_dialog_window": {
+    "geometry": "500x660+583+170",
     "maximized": false
   }
 }

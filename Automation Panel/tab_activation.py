@@ -29,21 +29,33 @@ def _center_on_parent(dlg, parent, w=480, h=600):
 
 
 def _style_dialog(dlg):
-    """Dark title bar + app icon for dialogs."""
+    """Dark title bar + app icon. Re-applies icon at multiple delays to
+    override CTk's own after() calls that reset it to the blue default.
+    Also removes the system menu so clicking the icon shows no popup."""
     import os as _os
-    try:
-        _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
-        if _os.path.exists(_ico):
-            dlg.iconbitmap(_ico)
-    except Exception:
-        pass
-    try:
-        from ctypes import windll, byref, sizeof, c_int
-        dlg.update_idletasks()
-        hwnd = windll.user32.GetParent(dlg.winfo_id())
-        windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
-    except Exception:
-        pass
+    _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
+    _ico = _ico if _os.path.exists(_ico) else None
+
+    def _apply():
+        try:
+            if _ico:
+                dlg.iconbitmap(_ico)
+        except Exception:
+            pass
+        try:
+            from ctypes import windll, byref, sizeof, c_int
+            dlg.update_idletasks()
+            hwnd = windll.user32.GetParent(dlg.winfo_id())
+            windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
+
+        except Exception:
+            pass
+
+    # Apply immediately and then beat CTk's delayed icon-reset calls
+    _apply()
+    dlg.after(10,  _apply)
+    dlg.after(100, _apply)
+    dlg.after(300, _apply)
 
 # ══════════════════════════════════════════════════════
 #  PIPELINE STEPS
@@ -1381,11 +1393,55 @@ class TabActivation:
     def _open_add(self):
         T   = self._T
         dlg = ctk.CTkToplevel(self._tab)
-        dlg.title(T("add_dialog"))
+        dlg.title(T(""))
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
-        _center_on_parent(dlg, self._tab, w=500, h=660)
+
+        # ── Restore saved geometry for add dialog ──
+        _add_win = load_section("add_dialog_window")
+        _add_restored = False
+        if _add_win:
+            try:
+                _geo = _add_win.get("geometry", "")
+                if _geo:
+                    dlg.geometry(_geo)
+                    _add_restored = True
+            except Exception:
+                pass
+        if not _add_restored:
+            _center_on_parent(dlg, self._tab, w=500, h=660)
+
         _style_dialog(dlg)
+
+        # ── Restore maximized state ──
+        if _add_win and _add_win.get("maximized"):
+            dlg.after(150, lambda: dlg.state("zoomed"))
+
+        # ── Save geometry on move/resize ──
+        _add_geo_save_id = [None]
+        _add_last_normal_geo = [dlg.geometry()]
+
+        def _add_save_state():
+            try:
+                is_max = dlg.state() == "zoomed"
+                geo = _add_last_normal_geo[0] if is_max else dlg.geometry()
+                if not is_max:
+                    _add_last_normal_geo[0] = geo
+                save_state("add_dialog_window", {"geometry": geo, "maximized": is_max})
+            except Exception:
+                pass
+
+        def _add_on_configure(event=None):
+            try:
+                if dlg.state() != "zoomed":
+                    _add_last_normal_geo[0] = dlg.geometry()
+            except Exception:
+                pass
+            if _add_geo_save_id[0] is not None:
+                dlg.after_cancel(_add_geo_save_id[0])
+            _add_geo_save_id[0] = dlg.after(600, _add_save_state)
+
+        dlg.bind("<Configure>", _add_on_configure)
 
         dh = ctk.CTkFrame(dlg, fg_color=("#5C2483", "#5C2483"), corner_radius=0, height=52)
         dh.pack(fill="x")
@@ -1648,11 +1704,55 @@ class TabActivation:
         d   = self._test_data[self._sel_row]
         T   = self._T
         dlg = ctk.CTkToplevel(self._tab)
-        dlg.title("✎  Edit Row")
+        dlg.title("")
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
-        _center_on_parent(dlg, self._tab, w=500, h=600)
+
+        # ── Restore saved geometry for edit dialog ──
+        _edit_win = load_section("edit_dialog_window")
+        _edit_restored = False
+        if _edit_win:
+            try:
+                _geo = _edit_win.get("geometry", "")
+                if _geo:
+                    dlg.geometry(_geo)
+                    _edit_restored = True
+            except Exception:
+                pass
+        if not _edit_restored:
+            _center_on_parent(dlg, self._tab, w=500, h=600)
+
         _style_dialog(dlg)
+
+        # ── Restore maximized state ──
+        if _edit_win and _edit_win.get("maximized"):
+            dlg.after(150, lambda: dlg.state("zoomed"))
+
+        # ── Save geometry on move/resize ──
+        _edit_geo_save_id = [None]
+        _edit_last_normal_geo = [dlg.geometry()]
+
+        def _edit_save_state():
+            try:
+                is_max = dlg.state() == "zoomed"
+                geo = _edit_last_normal_geo[0] if is_max else dlg.geometry()
+                if not is_max:
+                    _edit_last_normal_geo[0] = geo
+                save_state("edit_dialog_window", {"geometry": geo, "maximized": is_max})
+            except Exception:
+                pass
+
+        def _edit_on_configure(event=None):
+            try:
+                if dlg.state() != "zoomed":
+                    _edit_last_normal_geo[0] = dlg.geometry()
+            except Exception:
+                pass
+            if _edit_geo_save_id[0] is not None:
+                dlg.after_cancel(_edit_geo_save_id[0])
+            _edit_geo_save_id[0] = dlg.after(600, _edit_save_state)
+
+        dlg.bind("<Configure>", _edit_on_configure)
 
         dh = ctk.CTkFrame(dlg, fg_color="#B45309", corner_radius=0, height=52)
         dh.pack(fill="x")
