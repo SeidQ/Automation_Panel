@@ -29,33 +29,26 @@ def _center_on_parent(dlg, parent, w=480, h=600):
 
 
 def _style_dialog(dlg):
-    """Dark title bar + app icon. Re-applies icon at multiple delays to
-    override CTk's own after() calls that reset it to the blue default.
-    Also removes the system menu so clicking the icon shows no popup."""
+    """Dark title bar + app icon — no flicker."""
     import os as _os
     _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
     _ico = _ico if _os.path.exists(_ico) else None
 
-    def _apply():
-        try:
-            if _ico:
-                dlg.iconbitmap(_ico)
-        except Exception:
-            pass
-        try:
-            from ctypes import windll, byref, sizeof, c_int
-            dlg.update_idletasks()
-            hwnd = windll.user32.GetParent(dlg.winfo_id())
-            windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
-
-        except Exception:
-            pass
-
-    # Apply immediately and then beat CTk's delayed icon-reset calls
-    _apply()
-    dlg.after(10,  _apply)
-    dlg.after(100, _apply)
-    dlg.after(300, _apply)
+    # Hide window, apply icon+titlebar, then show — prevents default icon flash
+    dlg.withdraw()
+    try:
+        if _ico:
+            dlg.iconbitmap(_ico)
+    except Exception:
+        pass
+    try:
+        from ctypes import windll, byref, sizeof, c_int
+        dlg.update_idletasks()
+        hwnd = windll.user32.GetParent(dlg.winfo_id())
+        windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
+    except Exception:
+        pass
+    dlg.deiconify()
 
 # ══════════════════════════════════════════════════════
 #  PIPELINE STEPS
@@ -345,13 +338,11 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
                 raise Exception("VPN bağlantısı yoxdur — dealer-online.azercell.com əlçatmazdır")
             raise
 
-        # Hook: after every HTTP response, raise immediately if cancelled
         def _cancel_hook(r, *args, **kwargs):
             if stop_ev.is_set():
                 raise Exception("__CANCELLED__")
         session.hooks["response"].append(_cancel_hook)
 
-        # ── Check cancel after login ──────────────────
         if stop_ev.is_set():
             return
 
@@ -360,7 +351,6 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
         log(1, "Validating document & MHM check...")
         check_mhm(session, base_url, data)
 
-        # ── Check cancel after MHM ────────────────────
         if stop_ev.is_set():
             return
 
@@ -370,7 +360,6 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
                 raise Exception("checkMHM: Prepaid aktivasiya üçün vauçer tələb olunur")
             add_voucher(session, base_url, voucher, data["MSISDN"], data["SIMCARD"])
 
-            # ── Check cancel after voucher ────────────
             if stop_ev.is_set():
                 return
 
@@ -379,7 +368,6 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
         log(2, "Registering customer...")
         register_customer(session, base_url, data, consts)
 
-        # ── Check cancel after register ───────────────
         if stop_ev.is_set():
             return
 
@@ -390,7 +378,6 @@ def run_single(data, base_url, username, password, consts, log_q, result_q, stop
                       "TARIFF_TYPE": tariff_label, "STATUS": "PASSED", "ERROR": ""})
 
     except Exception as e:
-        # If cancelled (either by flag or by our hook), silently discard
         if stop_ev.is_set() or "__CANCELLED__" in str(e):
             return
 
@@ -437,23 +424,23 @@ class MsisdnCard:
         badge.pack(side="left", padx=(0, 8))
         badge.pack_propagate(False)
         ctk.CTkLabel(badge, text=str(index),
-                     font=("Segoe UI", 10, "bold"),
+                     font=("Segoe UI", 12, "bold"),
                      text_color="white").place(relx=.5, rely=.5, anchor="center")
 
         ctk.CTkLabel(hdr, text=msisdn,
                      font=("Consolas", 13, "bold"),
                      text_color=("#EDE8F5", "#1A0A2E")).pack(side="left")
         ctk.CTkLabel(hdr, text=f"  {plan_type}  ·  {tariff_type}",
-                     font=("Segoe UI", 10),
+                     font=("Segoe UI", 12),
                      text_color=("#8B75B0", "#6B5A8A")).pack(side="left", padx=4)
 
         self._ts_lbl = ctk.CTkLabel(hdr, text=datetime.now().strftime("%H:%M:%S"),
-                                    font=("Consolas", 10),
+                                    font=("Consolas", 13),
                                     text_color=("#8B75B0", "#6B5A8A"))
         self._ts_lbl.pack(side="right")
 
         self._badge = ctk.CTkLabel(hdr, text="  ⏳ RUNNING  ",
-                                   font=("Segoe UI", 10, "bold"),
+                                   font=("Segoe UI", 12, "bold"),
                                    text_color=("#F59E0B", "#D97706"),
                                    fg_color=("#1C1030", "#FFFFFF"), corner_radius=6)
         self._badge.pack(side="right", padx=(0, 8))
@@ -469,11 +456,11 @@ class MsisdnCard:
             icon = ctk.CTkLabel(sf, text=icon_char, font=("Segoe UI", 12),
                                 text_color=("#8B75B0", "#6B5A8A"))
             icon.pack(side="left", padx=(0, 2))
-            lbl = ctk.CTkLabel(sf, text=name, font=("Segoe UI", 10),
+            lbl = ctk.CTkLabel(sf, text=name, font=("Segoe UI", 12),
                                text_color=("#8B75B0", "#6B5A8A"))
             lbl.pack(side="left")
             if i < len(self._steps) - 1:
-                ctk.CTkLabel(sf, text="  →  ", font=("Segoe UI", 10),
+                ctk.CTkLabel(sf, text="  →  ", font=("Segoe UI", 12),
                              text_color=("#3D2260", "#C4B0DC")).pack(side="left")
             self._step_widgets.append((icon, lbl, icon_char))
 
@@ -519,14 +506,8 @@ class MsisdnCard:
 
 # ══════════════════════════════════════════════════════
 #  OVERLAY DROPDOWN HELPER
-#  Toplevel popup — layout-u itələmir, etibarlı açılır
 # ══════════════════════════════════════════════════════
 def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
-    """
-    Dropdown using a borderless Toplevel popup window.
-    Never pushes sibling widgets. Returns a StringVar.
-    Closes when mouse leaves the popup area.
-    """
     import tkinter as tk
 
     val    = default if default in values else (values[0] if values else "")
@@ -578,7 +559,7 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
         ry = trigger.winfo_rooty() + trigger.winfo_height()
         tw = trigger.winfo_width()
 
-        item_h   = 24
+        item_h   = 28
         max_show = 6
         n        = len(values)
         list_h   = item_h * min(n, max_show) + 8
@@ -617,14 +598,14 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
             is_sel = (v == cur)
             btn = tk.Button(
                 container, text=f"  {v}",
-                font=("Consolas", 10),
+                font=("Consolas", 13),
                 bg="#5C2483" if is_sel else bg,
                 fg="white",
                 activebackground="#3D2260", activeforeground="white",
-                relief="flat", anchor="w", bd=0, padx=6, pady=2,
+                relief="flat", anchor="w", bd=0, padx=6, pady=0,
                 cursor="hand2",
                 command=lambda v=v: _select(v))
-            btn.pack(fill="x", pady=1, padx=2)
+            btn.pack(fill="x", pady=0, padx=2, ipady=5)
 
             def _on_enter(e, b=btn):
                 b.configure(bg="#3D2260")
@@ -667,6 +648,9 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
 class TabActivation:
     BASE_URL = "https://dealer-online.azercell.com"
 
+    # Records per page in history
+    HIST_PAGE_SIZE = 10
+
     def __init__(self, tab, log_q: queue.Queue, result_q: queue.Queue,
                  stop_ev: threading.Event, T):
         self._tab      = tab
@@ -680,6 +664,8 @@ class TabActivation:
         self._test_data = deepcopy(DEFAULT_TEST_DATA)
         self._sel_row  = None
         self._cards: dict = {}
+        # History pagination state
+        self._hist_page = 1
         self._build()
 
     def _build(self):
@@ -766,36 +752,77 @@ class TabActivation:
         th.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         th.pack_propagate(False)
         mk_label(th, T("test_data"), color=C["muted"],
-                 font=("Segoe UI", 11, "bold")).pack(side="left", padx=18, pady=14)
+                 font=("Segoe UI", 14, "bold")).pack(side="left", padx=18, pady=14)
         self._td_count = mk_label(th, f"{len(self._test_data)} {T('rows')}",
                                   color=C["accent"], font=FONT_MONO_S)
         self._td_count.pack(side="right", padx=10)
         ctk.CTkButton(th, text=T("delete"), width=70, height=30,
-                      font=("Segoe UI", 11, "bold"), fg_color=("#EF4444", "#DC2626"),
+                      font=("Segoe UI", 14, "bold"), fg_color=("#EF4444", "#DC2626"),
                       hover_color="#B91C1C", corner_radius=8,
                       command=self._delete_sel).pack(side="right", pady=10)
         ctk.CTkButton(th, text="✎  Edit", width=80, height=30,
-                      font=("Segoe UI", 11, "bold"), fg_color="#B45309", hover_color="#92400E",
+                      font=("Segoe UI", 14, "bold"), fg_color="#B45309", hover_color="#92400E",
                       text_color="white", corner_radius=8,
                       command=self._open_edit).pack(side="right", padx=6, pady=10)
         ctk.CTkButton(th, text=T("add"), width=90, height=30,
-                      font=("Segoe UI", 11, "bold"), fg_color=("#5C2483", "#5C2483"),
+                      font=("Segoe UI", 14, "bold"), fg_color=("#5C2483", "#5C2483"),
                       hover_color=("#7C6EB0", "#7C6EB0"), corner_radius=8,
                       command=self._open_add).pack(side="right", padx=6, pady=10)
 
-        self._data_box = ctk.CTkTextbox(
-            right, font=FONT_MONO_S, fg_color=("#1C1030", "#FFFFFF"),
-            text_color=("#EDE8F5", "#1A0A2E"), border_color=("#3D2260", "#C4B0DC"),
-            border_width=1, corner_radius=12, wrap="none")
-        self._data_box.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
-        self._data_box.bind("<Button-1>", self._on_row_click)
+        # ── Canvas-based data table ────────────────────
+        import tkinter as _tk2
+
+        _tbl_outer = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"),
+                                  corner_radius=12, border_width=1,
+                                  border_color=("#3D2260", "#C4B0DC"))
+        _tbl_outer.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        _tbl_outer.columnconfigure(0, weight=1)
+        _tbl_outer.rowconfigure(1, weight=1)
+
+        # Column header
+        _col_hdr = ctk.CTkFrame(_tbl_outer, fg_color=("#251540", "#DDD5EE"),
+                                corner_radius=0, height=32)
+        _col_hdr.grid(row=0, column=0, columnspan=2, sticky="ew", padx=1, pady=(1,0))
+        _col_hdr.pack_propagate(False)
+        _COLS = [("#",28),("MSISDN",100),("SIMCARD",130),("DOC_NO",90),
+                 ("PIN",72),("TARIFF",140),("PLAN",82),("TYPE",90),("VOUCHER",0)]
+        for _cn, _cw in _COLS:
+            ctk.CTkLabel(_col_hdr, text=_cn, font=("Segoe UI", 12, "bold"),
+                         text_color=("#8B75B0","#6B5A8A"),
+                         width=_cw or 0, anchor="w").pack(
+                side="left", padx=(10 if _cn=="#" else 6, 2),
+                fill="x" if not _cw else None, expand=(not _cw))
+
+        _db_canvas = _tk2.Canvas(_tbl_outer, bg="#1C1030", highlightthickness=0, bd=0)
+        _db_canvas.grid(row=1, column=0, sticky="nsew")
+        _db_sb = ctk.CTkScrollbar(_tbl_outer, orientation="vertical",
+                                  command=_db_canvas.yview,
+                                  button_color=("#3D2260","#C4B0DC"),
+                                  button_hover_color=("#7C6EB0","#7C6EB0"))
+        _db_sb.grid(row=1, column=1, sticky="ns", pady=(0,1))
+        _db_canvas.configure(yscrollcommand=_db_sb.set)
+        _db_inner = ctk.CTkFrame(_db_canvas, fg_color=("#1C1030","#FFFFFF"), corner_radius=0)
+        _db_inner_id = _db_canvas.create_window((0,0), window=_db_inner, anchor="nw")
+
+        def _db_on_inner(e=None): _db_canvas.configure(scrollregion=_db_canvas.bbox("all"))
+        def _db_on_canvas(e=None): _db_canvas.itemconfig(_db_inner_id, width=_db_canvas.winfo_width())
+        _db_inner.bind("<Configure>", _db_on_inner)
+        _db_canvas.bind("<Configure>", _db_on_canvas)
+        def _db_mw(e): _db_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        _db_canvas.bind("<MouseWheel>", _db_mw)
+        _db_inner.bind("<MouseWheel>", _db_mw)
+
+        self._data_box   = None
+        self._db_canvas  = _db_canvas
+        self._db_inner   = _db_inner
+        self._db_bind_mw = _db_mw
         self._render_data()
 
         ch = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12, height=52)
         ch.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         ch.pack_propagate(False)
         mk_label(ch, "⚡  LIVE CONSOLE", color=C["muted"],
-                 font=("Segoe UI", 11, "bold")).pack(side="left", padx=18, pady=14)
+                 font=("Segoe UI", 14, "bold")).pack(side="left", padx=18, pady=14)
         self._progress_lbl = mk_label(ch, "", color=C["accent"], font=FONT_MONO_S)
         self._progress_lbl.pack(side="right", padx=6)
         self._res_summary = mk_label(ch, "—", color=C["muted"], font=FONT_MONO_S)
@@ -879,7 +906,7 @@ class TabActivation:
         hcard = ctk.CTkFrame(self._console, fg_color=("#5C2483", "#5C2483"), corner_radius=12)
         hcard.pack(fill="x", padx=6, pady=(6, 10))
         ctk.CTkLabel(hcard, text=T("summary_title"),
-                     font=("Segoe UI", 13, "bold"),
+                     font=("Segoe UI", 14, "bold"),
                      text_color="white").pack(side="left", padx=18, pady=12)
 
         stats = ctk.CTkFrame(hcard, fg_color="transparent")
@@ -900,7 +927,7 @@ class TabActivation:
         col_hdr.pack(fill="x", padx=6, pady=(0, 4))
         for txt, w in [("#", 32), ("MSISDN", 120), ("Plan", 90),
                        ("Type", 90), ("Status", 110), ("Note", 0)]:
-            ctk.CTkLabel(col_hdr, text=txt, font=("Segoe UI", 10, "bold"),
+            ctk.CTkLabel(col_hdr, text=txt, font=("Segoe UI", 12, "bold"),
                          text_color=("#8B75B0", "#6B5A8A"), width=w or 0, anchor="w"
                          ).pack(side="left", padx=(12 if txt == "#" else 4, 4), pady=7,
                                 fill="x" if not w else None, expand=(not w))
@@ -914,26 +941,26 @@ class TabActivation:
                               corner_radius=10, border_width=1, border_color=bdr)
             rc.pack(fill="x", padx=6, pady=2)
 
-            ctk.CTkLabel(rc, text=str(i), font=("Consolas", 11),
+            ctk.CTkLabel(rc, text=str(i), font=("Consolas", 13),
                          text_color=("#8B75B0", "#6B5A8A"), width=32, anchor="w"
                          ).pack(side="left", padx=(12, 4), pady=9)
-            ctk.CTkLabel(rc, text=r["MSISDN"], font=("Consolas", 12, "bold"),
+            ctk.CTkLabel(rc, text=r["MSISDN"], font=("Consolas", 13, "bold"),
                          text_color=("#EDE8F5", "#1A0A2E"), width=120, anchor="w"
                          ).pack(side="left", padx=4, pady=9)
-            ctk.CTkLabel(rc, text=r["PLAN_TYPE"], font=("Segoe UI", 11),
+            ctk.CTkLabel(rc, text=r["PLAN_TYPE"], font=("Segoe UI", 14),
                          text_color=("#8B75B0", "#6B5A8A"), width=90, anchor="w"
                          ).pack(side="left", padx=4, pady=9)
-            ctk.CTkLabel(rc, text=r["TARIFF_TYPE"], font=("Segoe UI", 11),
+            ctk.CTkLabel(rc, text=r["TARIFF_TYPE"], font=("Segoe UI", 14),
                          text_color=("#8B75B0", "#6B5A8A"), width=90, anchor="w"
                          ).pack(side="left", padx=4, pady=9)
             ctk.CTkLabel(rc, text="  ✅ PASSED  " if ok else "  ❌ FAILED  ",
-                         font=("Segoe UI", 10, "bold"),
+                         font=("Segoe UI", 12, "bold"),
                          text_color=("#22C55E", "#16A34A") if ok else C["error"],
                          fg_color=("#1C1030", "#FFFFFF"), corner_radius=6
                          ).pack(side="left", padx=4, pady=9)
             if r["ERROR"]:
                 ctk.CTkLabel(rc, text=f"↳ {r['ERROR']}",
-                             font=("Consolas", 10),
+                             font=("Consolas", 13),
                              text_color=("#EF4444", "#DC2626"), anchor="w"
                              ).pack(side="left", padx=8, pady=9, fill="x", expand=True)
 
@@ -990,7 +1017,6 @@ class TabActivation:
         threading.Thread(target=worker, daemon=True).start()
 
     def _force_done(self):
-        # If user cancelled, do not override the cancelled state
         if self._stop_ev.is_set():
             return
         if self._results:
@@ -1005,9 +1031,7 @@ class TabActivation:
         self._running = False
         self._run_btn.configure(state="normal")
         self._cancel_btn.configure(state="disabled")
-        # Show cancel message in each running card's detail label
         for msisdn, card in self._cards.items():
-            # Only update cards that haven't finished yet (no PASSED/FAILED badge)
             badge_text = card._badge.cget("text")
             if "RUNNING" in badge_text:
                 card._frame.configure(border_color=("#EF4444", "#DC2626"))
@@ -1018,7 +1042,6 @@ class TabActivation:
                 card._detail.configure(
                     text="  ↳ Process cancelled by user",
                     text_color=C["error"])
-        # Also print to console log box if it has any children other than cards
         ts = datetime.now().strftime("%H:%M:%S")
         cancel_card = ctk.CTkFrame(
             self._console,
@@ -1028,7 +1051,7 @@ class TabActivation:
         ctk.CTkLabel(
             cancel_card,
             text=f"🚫  [{ts}]  Process cancelled by user",
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 14, "bold"),
             text_color="#EF4444"
         ).pack(padx=14, pady=10)
 
@@ -1061,7 +1084,11 @@ class TabActivation:
         for r in self._results:
             if r.get("STATUS") == "PASSED":
                 entry = dict(r)
-                entry["TIME"] = datetime.now().strftime("%H:%M:%S")
+                # ── Store full datetime: "Mar 06  14:35:22" ──
+                now = datetime.now()
+                entry["TIME"] = now.strftime("%b %d  %H:%M:%S")
+                entry["DATE"] = now.strftime("%b %d")
+                entry["CLOCK"] = now.strftime("%H:%M:%S")
                 self._history.append(entry)
         self._show_summary()
         self._autosave()
@@ -1091,6 +1118,11 @@ class TabActivation:
     def build_history_tab(self, parent):
         T = self._T
 
+        # ── grid: row 0=filter, 1=stats, 2=tbl_wrap(col-hdr+list), 3=pagination ──
+        parent.rowconfigure(2, weight=1)
+        parent.rowconfigure(3, weight=0)
+        parent.columnconfigure(0, weight=1)
+
         fc = ctk.CTkFrame(parent, fg_color=("#1C1030", "#FFFFFF"),
                           corner_radius=14, border_width=1,
                           border_color=("#3D2260", "#C4B0DC"))
@@ -1098,14 +1130,14 @@ class TabActivation:
         fc.columnconfigure((0, 1, 2), weight=1)
 
         ctk.CTkLabel(fc, text="🔎  FILTER & SEARCH",
-                     font=("Segoe UI", 10, "bold"),
+                     font=("Segoe UI", 12, "bold"),
                      text_color=("#5C2483", "#5C2483")
                      ).grid(row=0, column=0, columnspan=3,
                             sticky="w", padx=16, pady=(10, 4))
 
         col0 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col0.grid(row=1, column=0, sticky="nsew", padx=(12, 5), pady=(0, 12))
-        ctk.CTkLabel(col0, text="📱  MSISDN", font=("Segoe UI", 10, "bold"),
+        ctk.CTkLabel(col0, text="📱  MSISDN", font=("Segoe UI", 12, "bold"),
                      text_color=("#8B75B0", "#6B5A8A")).pack(anchor="w", padx=12, pady=(8, 3))
         self._hist_msisdn_var = ctk.StringVar()
         ctk.CTkEntry(col0, textvariable=self._hist_msisdn_var,
@@ -1113,13 +1145,13 @@ class TabActivation:
                      fg_color=("#1C1030", "#FFFFFF"), border_color=("#3D2260", "#C4B0DC"),
                      text_color=("#EDE8F5", "#1A0A2E"),
                      placeholder_text_color=("#3D2260", "#C4B0DC"),
-                     font=("Consolas", 12), height=36, corner_radius=8
+                     font=("Consolas", 13), height=36, corner_radius=8
                      ).pack(fill="x", padx=12, pady=(0, 10))
-        self._hist_msisdn_var.trace_add("write", lambda *_: self._hist_refresh())
+        self._hist_msisdn_var.trace_add("write", lambda *_: self._hist_reset_page())
 
         col1 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col1.grid(row=1, column=1, sticky="nsew", padx=5, pady=(0, 12))
-        ctk.CTkLabel(col1, text="📋  TARIFF", font=("Segoe UI", 10, "bold"),
+        ctk.CTkLabel(col1, text="📋  TARIFF", font=("Segoe UI", 12, "bold"),
                      text_color=("#8B75B0", "#6B5A8A")).pack(anchor="w", padx=12, pady=(8, 3))
         self._hist_tariff_var = ctk.StringVar(value="All Tariffs")
         all_tariffs = (["All Tariffs"]
@@ -1144,7 +1176,7 @@ class TabActivation:
                     fg_color=("#5C2483","#5C2483") if t==v else "transparent",
                     text_color="white" if t==v else "#EDE8F5")
             _ht_close()
-            self._hist_refresh()
+            self._hist_reset_page()
 
         def _ht_toggle():
             if _ht_open[0]:
@@ -1165,7 +1197,7 @@ class TabActivation:
 
         _ht_lbl = ctk.CTkLabel(
             _ht_trigger, text="  All Tariffs",
-            font=("Segoe UI", 11), anchor="w",
+            font=("Segoe UI", 14), anchor="w",
             text_color=("#EDE8F5","#1A0A2E"))
         _ht_lbl.pack(side="left", fill="x", expand=True, padx=(4,0), pady=4)
         _ht_lbl.bind("<Button-1>", lambda e: _ht_toggle())
@@ -1186,7 +1218,7 @@ class TabActivation:
 
         for v in all_tariffs:
             b = ctk.CTkButton(
-                _ht_lf, text=v, font=("Consolas",11), height=28,
+                _ht_lf, text=v, font=("Consolas", 13), height=28,
                 anchor="w", corner_radius=6,
                 fg_color=("#5C2483","#5C2483") if v=="All Tariffs" else "transparent",
                 hover_color=("#3D2260","#C4B0DC"),
@@ -1197,7 +1229,7 @@ class TabActivation:
 
         col2 = ctk.CTkFrame(fc, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
         col2.grid(row=1, column=2, sticky="nsew", padx=(5, 12), pady=(0, 12))
-        ctk.CTkLabel(col2, text="💳  PLAN TYPE", font=("Segoe UI", 10, "bold"),
+        ctk.CTkLabel(col2, text="💳  PLAN TYPE", font=("Segoe UI", 12, "bold"),
                      text_color=("#8B75B0", "#6B5A8A")).pack(anchor="w", padx=12, pady=(8, 3))
         plan_row = ctk.CTkFrame(col2, fg_color="transparent")
         plan_row.pack(fill="x", padx=12, pady=(0, 6))
@@ -1207,61 +1239,229 @@ class TabActivation:
         for col_idx, (val, lbl) in enumerate([("All", "All"), ("PostPaid", "PostPaid"), ("Prepaid", "Prepaid")]):
             b = ctk.CTkButton(
                 plan_row, text=lbl, height=28,
-                font=("Segoe UI", 10, "bold"), corner_radius=7,
+                font=("Segoe UI", 12, "bold"), corner_radius=7,
                 fg_color=("#5C2483", "#5C2483") if val == "All" else ("#3D2260", "#C4B0DC"),
                 hover_color=("#7C6EB0", "#7C6EB0"), text_color="white",
                 command=lambda v=val: self._set_plan_chip(v))
             b.grid(row=0, column=col_idx, padx=(0, 3) if col_idx < 2 else 0, sticky="ew")
             self._plan_btns[val] = b
 
+        # ── Stats bar ──────────────────────────────────
         self._hist_stats_bar = ctk.CTkFrame(parent, fg_color=("#1C1030", "#FFFFFF"),
                                             corner_radius=10, height=36)
         self._hist_stats_bar.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 6))
         self._hist_stats_bar.pack_propagate(False)
         self._hist_stats_lbl = ctk.CTkLabel(self._hist_stats_bar, text="",
-                                            font=("Segoe UI", 11),
+                                            font=("Segoe UI", 14),
                                             text_color=("#8B75B0", "#6B5A8A"))
         self._hist_stats_lbl.pack(side="left", padx=14)
 
-        col_hdr = ctk.CTkFrame(parent, fg_color=("#251540", "#EDE8F5"),
-                               corner_radius=8, height=34)
-        col_hdr.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 4))
-        col_hdr.pack_propagate(False)
-        for txt, w in [("#", 32), ("Time", 72), ("MSISDN", 120),
-                       ("Plan", 88), ("Tariff", 130), ("Status", 108), ("Note", 0)]:
-            ctk.CTkLabel(col_hdr, text=txt, font=("Segoe UI", 10, "bold"),
-                         text_color=("#8B75B0", "#6B5A8A"), width=w or 0, anchor="w"
-                         ).pack(side="left", padx=(12 if txt == "#" else 4, 4), pady=7,
-                                fill="x" if not w else None, expand=(not w))
+        # ── Table: header lives inside _scrollable_frame so it auto-aligns ──
+        # Use a plain frame grid above the scroll; row data goes inside scroll.
+        # The ONLY reliable way: put header INSIDE the scrollable frame as a
+        # sticky non-scrolling row — done by placing it in the inner frame
+        # with pack BEFORE any data rows, and using pack_propagate tricks.
+        # Simplest correct approach: outer wrapper, header matches content width.
 
-        self._hist_scroll = ctk.CTkScrollableFrame(
-            parent, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12,
-            border_width=1, border_color=("#3D2260", "#C4B0DC"),
-            scrollbar_button_color=("#3D2260", "#C4B0DC"),
-            scrollbar_button_hover_color=("#7C6EB0", "#7C6EB0"))
-        self._hist_scroll.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        self._hist_scroll.columnconfigure(0, weight=1)
+        import tkinter as _tk
+
+        tbl_wrap = ctk.CTkFrame(parent, fg_color="transparent")
+        tbl_wrap.grid(row=2, column=0, sticky="nsew", padx=8, pady=(0, 4))
+        tbl_wrap.columnconfigure(0, weight=1)
+        tbl_wrap.rowconfigure(1, weight=1)
+
+        # ── Column header ──────────────────────────────
+        col_hdr = ctk.CTkFrame(tbl_wrap, fg_color=("#251540", "#EDE8F5"),
+                               corner_radius=8, height=34)
+        col_hdr.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 2))
+        col_hdr.pack_propagate(False)
+
+        _HDR = [
+            ("#",      32,  12, 4),
+            ("Date",   68,  8,  4),
+            ("Time",   72,  7,  4),
+            ("MSISDN", 120, 7,  4),
+            ("Plan",   88,  3,  4),
+            ("Tariff", 130, 12, 4),
+            ("Status", 108, 11, 4),
+            ("Note",   0,   8,  4),
+        ]
+        for txt, w, pxl, pxr in _HDR:
+            ctk.CTkLabel(col_hdr, text=txt, font=("Segoe UI", 12, "bold"),
+                         text_color=("#8B75B0", "#6B5A8A"),
+                         width=w if w else 0, anchor="w").pack(
+                side="left", padx=(pxl, pxr), pady=7,
+                fill="x" if not w else None, expand=(not w))
+
+        # ── Native Canvas + Scrollbar ──────────────────
+        _canvas_bg = "#1C1030"
+        _hist_canvas = _tk.Canvas(tbl_wrap, bg=_canvas_bg,
+                                  highlightthickness=0, bd=0)
+        _hist_canvas.grid(row=1, column=0, sticky="nsew")
+
+        _scrollbar = ctk.CTkScrollbar(
+            tbl_wrap,
+            orientation="vertical",
+            command=_hist_canvas.yview,
+            button_color=("#3D2260", "#C4B0DC"),
+            button_hover_color=("#7C6EB0", "#7C6EB0"))
+        _scrollbar.grid(row=1, column=1, sticky="ns")
+
+        _hist_canvas.configure(yscrollcommand=_scrollbar.set)
+
+        # Inner frame that holds all rows
+        _inner = ctk.CTkFrame(_hist_canvas, fg_color=("#1C1030", "#FFFFFF"),
+                              corner_radius=0)
+        _inner_id = _hist_canvas.create_window((0, 0), window=_inner,
+                                               anchor="nw")
+
+        def _on_inner_configure(e=None):
+            _hist_canvas.configure(scrollregion=_hist_canvas.bbox("all"))
+
+        def _on_canvas_configure(e=None):
+            _hist_canvas.itemconfig(_inner_id, width=_hist_canvas.winfo_width())
+
+        _inner.bind("<Configure>", _on_inner_configure)
+        _hist_canvas.bind("<Configure>", _on_canvas_configure)
+
+        def _on_mousewheel(e):
+            _hist_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+        _hist_canvas.bind("<MouseWheel>", _on_mousewheel)
+        _inner.bind("<MouseWheel>", _on_mousewheel)
+
+        def _bind_mousewheel(w):
+            w.bind("<MouseWheel>", _on_mousewheel, add="+")
+            for c in w.winfo_children():
+                _bind_mousewheel(c)
+
+        # Store references for _hist_refresh to use
+        self._hist_scroll  = _inner          # pack rows into _inner
+        self._hist_canvas  = _hist_canvas
+        self._hist_bind_mw = _bind_mousewheel
+
+        # ── Pagination bar ─────────────────────────────
+        self._hist_page_bar = ctk.CTkFrame(parent, fg_color=("#1C1030", "#FFFFFF"),
+                                           corner_radius=10, height=42)
+        self._hist_page_bar.grid(row=3, column=0, sticky="ew", padx=8, pady=(0, 8))
+        self._hist_page_bar.pack_propagate(False)
 
         self._hist_refresh()
+
+    # ── Pagination helpers ─────────────────────────────
+    def _hist_reset_page(self):
+        self._hist_page = 1
+        self._hist_refresh()
+
+    def _hist_goto_page(self, page):
+        self._hist_page = page
+        self._hist_refresh()
+
+    def _build_pagination(self, total_pages):
+        """Rebuild the pagination bar for the current page."""
+        bar = self._hist_page_bar
+        for w in bar.winfo_children():
+            w.destroy()
+
+        if total_pages <= 1:
+            return
+
+        cur = self._hist_page
+
+        # ← Prev
+        ctk.CTkButton(
+            bar, text="←", width=36, height=28,
+            font=("Segoe UI", 12, "bold"),
+            fg_color=("#3D2260", "#C4B0DC") if cur > 1 else ("#251540", "#EDE8F5"),
+            hover_color=("#5C2483", "#5C2483"),
+            text_color="white" if cur > 1 else ("#3D2260", "#C4B0DC"),
+            corner_radius=8,
+            state="normal" if cur > 1 else "disabled",
+            command=lambda: self._hist_goto_page(cur - 1)
+        ).pack(side="left", padx=(10, 4), pady=6)
+
+        # Page number buttons — show up to 7 buttons with ellipsis
+        pages_to_show = self._page_window(cur, total_pages)
+
+        prev_p = None
+        for p in pages_to_show:
+            if prev_p is not None and p - prev_p > 1:
+                ctk.CTkLabel(bar, text="…", font=("Segoe UI", 12),
+                             text_color=("#8B75B0", "#6B5A8A"),
+                             width=24).pack(side="left", padx=2, pady=6)
+            is_cur = (p == cur)
+            # Fix: never pass "transparent" to border_color — use fg_color instead
+            ctk.CTkButton(
+                bar, text=str(p), width=34, height=28,
+                font=("Segoe UI", 14, "bold" if is_cur else "normal"),
+                fg_color=("#5C2483", "#5C2483") if is_cur else ("#251540", "#EDE8F5"),
+                hover_color=("#7C6EB0", "#7C6EB0"),
+                text_color="white" if is_cur else ("#EDE8F5", "#1A0A2E"),
+                corner_radius=8,
+                border_width=2 if is_cur else 0,
+                border_color=("#7C6EB0", "#7C6EB0") if is_cur else ("#5C2483", "#5C2483"),
+                command=lambda p=p: self._hist_goto_page(p)
+            ).pack(side="left", padx=2, pady=6)
+            prev_p = p
+
+        # → Next
+        ctk.CTkButton(
+            bar, text="→", width=36, height=28,
+            font=("Segoe UI", 12, "bold"),
+            fg_color=("#3D2260", "#C4B0DC") if cur < total_pages else ("#251540", "#EDE8F5"),
+            hover_color=("#5C2483", "#5C2483"),
+            text_color="white" if cur < total_pages else ("#3D2260", "#C4B0DC"),
+            corner_radius=8,
+            state="normal" if cur < total_pages else "disabled",
+            command=lambda: self._hist_goto_page(cur + 1)
+        ).pack(side="left", padx=(4, 10), pady=6)
+
+
+
+    @staticmethod
+    def _page_window(cur, total, max_btns=7):
+        """Return a sorted list of page numbers to display (no ellipsis gaps here,
+        caller inserts '…' when consecutive pages differ by > 1)."""
+        if total <= max_btns:
+            return list(range(1, total + 1))
+        # Always show first, last, current and neighbours
+        must = {1, total, cur}
+        for d in (-2, -1, 1, 2):
+            p = cur + d
+            if 1 <= p <= total:
+                must.add(p)
+        # Fill up to max_btns from the middle
+        result = sorted(must)
+        if len(result) < max_btns:
+            extras = [p for p in range(1, total + 1) if p not in must]
+            for p in extras:
+                result.append(p)
+                if len(result) >= max_btns:
+                    break
+            result = sorted(result)
+        return result
 
     def _set_plan_chip(self, val):
         self._hist_plan_var.set(val)
         for v, btn in self._plan_btns.items():
             btn.configure(fg_color=("#5C2483", "#5C2483") if v == val else ("#3D2260", "#C4B0DC"))
-        self._hist_refresh()
+        self._hist_reset_page()
 
     def _set_status_chip(self, val):
         self._hist_status_var.set(val)
         for v, btn in self._status_btns.items():
             active = v == val
             btn.configure(fg_color=self._status_colors[v] if active else "#2A1A2A")
-        self._hist_refresh()
+        self._hist_reset_page()
 
     def _hist_refresh(self):
         if not hasattr(self, "_hist_scroll"):
             return
         for w in self._hist_scroll.winfo_children():
             w.destroy()
+        # Reset scroll to top
+        if hasattr(self, "_hist_canvas"):
+            self._hist_canvas.yview_moveto(0)
 
         T = self._T
 
@@ -1287,50 +1487,95 @@ class TabActivation:
             self._hist_stats_lbl.configure(
                 text=f"  {total} record{'s' if total != 1 else ''}  ·  ✅ {passed}  ·  ❌ {failed}")
 
+        # ── Pagination ─────────────────────────────────
+        page_size   = self.HIST_PAGE_SIZE
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        # Clamp current page
+        if self._hist_page > total_pages:
+            self._hist_page = total_pages
+        if self._hist_page < 1:
+            self._hist_page = 1
+        cur_page = self._hist_page
+
+        # Slice — show newest first (reversed), then paginate
+        rows_rev = list(reversed(rows))
+        start    = (cur_page - 1) * page_size
+        end      = start + page_size
+        page_rows = rows_rev[start:end]
+
         if not rows:
             ctk.CTkLabel(self._hist_scroll, text=T("hist_empty"),
                          font=("Segoe UI", 12),
                          text_color=("#8B75B0", "#6B5A8A")).pack(pady=32)
-            return
+        else:
+            # Global row number = reversed index across all filtered rows
+            for i, r in enumerate(page_rows, start + 1):
+                ok     = r.get("STATUS") == "PASSED"
+                row_bg = "#0B2210" if ok else "#2A0A0A"
+                bdr    = "#22C55E" if ok else "#EF4444"
 
-        for i, r in enumerate(reversed(rows), 1):
-            ok     = r.get("STATUS") == "PASSED"
-            row_bg = "#0B2210" if ok else "#2A0A0A"
-            bdr    = "#22C55E" if ok else "#EF4444"
+                rc = ctk.CTkFrame(self._hist_scroll, fg_color=row_bg,
+                                  corner_radius=10, border_width=1, border_color=bdr)
+                rc.pack(fill="x", padx=4, pady=2)
 
-            rc = ctk.CTkFrame(self._hist_scroll, fg_color=row_bg,
-                              corner_radius=10, border_width=1, border_color=bdr)
-            rc.pack(fill="x", padx=4, pady=2)
+                # ── Row cells — padx mirrors COL_DEFS in build_history_tab ──
+                ctk.CTkLabel(rc, text=str(i), font=("Consolas", 13),
+                             text_color=("#8B75B0", "#6B5A8A"), width=32, anchor="w"
+                             ).pack(side="left", padx=(12, 4), pady=8)
 
-            ctk.CTkLabel(rc, text=str(i), font=("Consolas", 11),
-                         text_color=("#8B75B0", "#6B5A8A"), width=32, anchor="w"
-                         ).pack(side="left", padx=(12, 4), pady=8)
-            ctk.CTkLabel(rc, text=r.get("TIME", "—"), font=("Consolas", 10),
-                         text_color=("#8B75B0", "#6B5A8A"), width=72, anchor="w"
-                         ).pack(side="left", padx=4, pady=8)
-            ctk.CTkLabel(rc, text=r.get("MSISDN", "—"), font=("Consolas", 12, "bold"),
-                         text_color=("#EDE8F5", "#1A0A2E"), width=120, anchor="w"
-                         ).pack(side="left", padx=4, pady=8)
-            ctk.CTkLabel(rc, text=r.get("PLAN_TYPE", "—"), font=("Segoe UI", 11),
-                         text_color=("#8B75B0", "#6B5A8A"), width=88, anchor="w"
-                         ).pack(side="left", padx=4, pady=8)
-            tariff_code = r.get("TARIFF", "")
-            tariff_display = (TARIFF_RCODE_MAP.get(tariff_code)
-                              or PREPAID_TARIFF_MAP.get(tariff_code)
-                              or r.get("TARIFF_TYPE", "—"))
-            ctk.CTkLabel(rc, text=tariff_display, font=("Segoe UI", 11),
-                         text_color=("#8B75B0", "#6B5A8A"), width=130, anchor="w"
-                         ).pack(side="left", padx=4, pady=8)
-            ctk.CTkLabel(rc, text="  ✅ PASSED  " if ok else "  ❌ FAILED  ",
-                         font=("Segoe UI", 10, "bold"),
-                         text_color=("#22C55E", "#16A34A") if ok else "#EF4444",
-                         fg_color=("#1C1030", "#FFFFFF"), corner_radius=6
-                         ).pack(side="left", padx=4, pady=8)
-            if r.get("ERROR"):
-                ctk.CTkLabel(rc, text=f"↳ {r['ERROR']}",
-                             font=("Consolas", 10),
-                             text_color=("#EF4444", "#DC2626"), anchor="w"
-                             ).pack(side="left", padx=8, pady=8, fill="x", expand=True)
+                # Date / Time (backward compat with old TIME-only entries)
+                date_str  = r.get("DATE",  "")
+                clock_str = r.get("CLOCK", "")
+                if not date_str:
+                    raw_time = r.get("TIME", "—")
+                    parts = raw_time.split()
+                    if len(parts) >= 3:
+                        date_str  = f"{parts[0]} {parts[1]}"
+                        clock_str = parts[2] if len(parts) > 2 else ""
+                    elif len(parts) == 2:
+                        date_str  = f"{parts[0]} {parts[1]}"
+                        clock_str = ""
+                    else:
+                        date_str  = raw_time
+                        clock_str = ""
+
+                ctk.CTkLabel(rc, text=date_str, font=("Consolas", 13),
+                             text_color=("#8B75B0", "#6B5A8A"), width=68, anchor="w"
+                             ).pack(side="left", padx=(4, 4), pady=8)
+                ctk.CTkLabel(rc, text=clock_str, font=("Consolas", 13),
+                             text_color=("#8B75B0", "#6B5A8A"), width=72, anchor="w"
+                             ).pack(side="left", padx=(4, 4), pady=8)
+                ctk.CTkLabel(rc, text=r.get("MSISDN", "—"), font=("Consolas", 13, "bold"),
+                             text_color=("#EDE8F5", "#1A0A2E"), width=120, anchor="w"
+                             ).pack(side="left", padx=(4, 4), pady=8)
+                ctk.CTkLabel(rc, text=r.get("PLAN_TYPE", "—"), font=("Segoe UI", 14),
+                             text_color=("#8B75B0", "#6B5A8A"), width=88, anchor="w"
+                             ).pack(side="left", padx=(4, 4), pady=8)
+                tariff_code = r.get("TARIFF", "")
+                tariff_display = (TARIFF_RCODE_MAP.get(tariff_code)
+                                  or PREPAID_TARIFF_MAP.get(tariff_code)
+                                  or r.get("TARIFF_TYPE", "—"))
+                ctk.CTkLabel(rc, text=tariff_display, font=("Segoe UI", 14),
+                             text_color=("#8B75B0", "#6B5A8A"), width=130, anchor="w"
+                             ).pack(side="left", padx=(4, 4), pady=8)
+                ctk.CTkLabel(rc, text="  ✅ PASSED  " if ok else "  ❌ FAILED  ",
+                             font=("Segoe UI", 12, "bold"),
+                             text_color=("#22C55E", "#16A34A") if ok else "#EF4444",
+                             fg_color=("#1C1030", "#FFFFFF"), corner_radius=6
+                             ).pack(side="left", padx=(4, 4), pady=8)
+                if r.get("ERROR"):
+                    ctk.CTkLabel(rc, text=f"↳ {r['ERROR']}",
+                                 font=("Consolas", 13),
+                                 text_color=("#EF4444", "#DC2626"), anchor="w"
+                                 ).pack(side="left", padx=(8, 4), pady=8, fill="x", expand=True)
+
+        # ── Rebuild pagination bar ─────────────────────
+        if hasattr(self, "_hist_page_bar"):
+            self._build_pagination(total_pages)
+
+        # ── Re-bind mousewheel after render ───────────
+        if hasattr(self, "_hist_bind_mw"):
+            self._hist_scroll.after(50, lambda: self._hist_bind_mw(self._hist_scroll))
 
     # ══════════════════════════════════════════════════
     #  HELPERS
@@ -1350,37 +1595,104 @@ class TabActivation:
         }
 
     def _render_data(self):
-        self._data_box.configure(state="normal")
-        self._data_box.delete("1.0", "end")
-        self._data_box.tag_config("header",   foreground=C["muted"])
-        self._data_box.tag_config("selected", background="#3D1A6B")
-        hdr = (f"{'#':<3}  {'MSISDN':<12}  {'SIMCARD':<15}  "
-               f"{'DOC_NO':<10}  {'PIN':<8}  {'TARIFF':<18}  {'PLAN':<10}  {'TYPE':<12}  {'VOUCHER'}\n")
-        self._data_box.insert("end", hdr, "header")
-        self._data_box.insert("end", "─" * 108 + "\n", "header")
-        for i, d in enumerate(self._test_data, 1):
-            tt = TARIFF_TYPE_RMAP.get(d["TARIFF_TYPE"], d["TARIFF_TYPE"])
-            if d.get("PLAN_TYPE", "").lower() == "prepaid":
-                tr = PREPAID_TARIFF_MAP.get(d.get("TARIFF", ""), d.get("TARIFF", "—"))
+        """Full rebuild — only called when data changes (add/delete/edit)."""
+        if not hasattr(self, "_db_inner") or self._db_inner is None:
+            return
+        import tkinter as _tk3
+        import customtkinter as _ctk
+
+        for w in self._db_inner.winfo_children():
+            w.destroy()
+        if hasattr(self, "_db_canvas"):
+            self._db_canvas.yview_moveto(0)
+
+        self._db_rows = []   # list of (frame, [label, ...])
+
+        COL_W = [28, 100, 130, 90, 72, 140, 82, 90, 0]
+        PADX  = 10
+        muted = ("#8B75B0", "#6B5A8A")
+
+        for i, d in enumerate(self._test_data):
+            # separator before each row except first
+            if i > 0:
+                _tk3.Frame(self._db_inner, bg="#2A1A45", height=1).pack(fill="x")
+
+            is_even  = (i % 2 == 0)
+            norm_bg  = "#1C1030" if is_even else "#160C28"
+
+            tt = TARIFF_TYPE_RMAP.get(d.get("TARIFF_TYPE",""), d.get("TARIFF_TYPE",""))
+            if d.get("PLAN_TYPE","").lower() == "prepaid":
+                tr = PREPAID_TARIFF_MAP.get(d.get("TARIFF",""), d.get("TARIFF","—"))
             else:
-                tr = TARIFF_RCODE_MAP.get(d.get("TARIFF", ""), d.get("TARIFF", ""))
-            voucher = d.get("VOUCHER", "")
-            line = (f"{i:<3}  {d['MSISDN']:<12}  {d['SIMCARD']:<15}  "
-                    f"{d['DOC_NUMBER']:<10}  {d['DOC_PIN']:<8}  "
-                    f"{tr:<18}  {d['PLAN_TYPE']:<10}  {tt:<12}  {voucher}\n")
-            self._data_box.insert("end", line,
-                                  "selected" if self._sel_row == i - 1 else "")
-        self._data_box.configure(state="disabled")
-        self._td_count.configure(
-            text=f"{len(self._test_data)} {self._T('rows')}")
+                tr = TARIFF_RCODE_MAP.get(d.get("TARIFF",""), d.get("TARIFF",""))
+
+            plan     = d.get("PLAN_TYPE","")
+            plan_clr = ("#22C55E","#16A34A") if plan.lower()=="postpaid" else ("#F59E0B","#D97706")
+
+            rc = _ctk.CTkFrame(self._db_inner, fg_color=norm_bg,
+                               corner_radius=0, height=38)
+            rc.pack(fill="x")
+            rc.pack_propagate(False)
+
+            cells = [
+                (str(i+1),               COL_W[0], ("Consolas", 13),        muted),
+                (d.get("MSISDN",""),      COL_W[1], ("Consolas", 13,"bold"), ("#EDE8F5","#1A0A2E")),
+                (d.get("SIMCARD",""),     COL_W[2], ("Consolas", 13),        muted),
+                (d.get("DOC_NUMBER",""),  COL_W[3], ("Consolas", 13),        muted),
+                (d.get("DOC_PIN",""),     COL_W[4], ("Consolas", 13),        muted),
+                (tr,                      COL_W[5], ("Consolas", 13),        ("#EDE8F5","#1A0A2E")),
+                (plan,                    COL_W[6], ("Consolas", 13,"bold"), plan_clr),
+                (tt,                      COL_W[7], ("Consolas", 13),        muted),
+                (d.get("VOUCHER",""),     COL_W[8], ("Consolas", 13),        muted),
+            ]
+
+            lbls = []
+            for ci, (val, cw, fnt, clr) in enumerate(cells):
+                px = (PADX, 2) if ci == 0 else (6, 2)
+                lbl = _ctk.CTkLabel(rc, text=val, font=fnt, text_color=clr,
+                                    width=cw or 0, anchor="w")
+                lbl.pack(side="left", padx=px,
+                         fill="x" if not cw else None, expand=(not cw))
+                lbls.append(lbl)
+
+            self._db_rows.append((rc, norm_bg, lbls))
+
+            def _bind_row(widget, idx=i):
+                widget.bind("<Button-1>",
+                            lambda e, x=idx: self._on_row_click_idx(x))
+                widget.bind("<MouseWheel>",
+                            lambda e: self._db_canvas.yview_scroll(
+                                int(-1*(e.delta/120)), "units"))
+            _bind_row(rc)
+            for lbl in lbls:
+                _bind_row(lbl)
+
+        self._td_count.configure(text=f"{len(self._test_data)} {self._T('rows')}")
+        # apply selection highlight without rebuild
+        self._apply_row_selection()
+
+    def _apply_row_selection(self):
+        """Recolor rows for current selection — no widget rebuild, no flicker."""
+        if not hasattr(self, "_db_rows"):
+            return
+        for i, (rc, norm_bg, lbls) in enumerate(self._db_rows):
+            is_sel  = (self._sel_row == i)
+            row_bg  = "#3D1A6B" if is_sel else norm_bg
+            txt_clr = ("#C4B0DC","#1A0A2E") if is_sel else ("#EDE8F5","#1A0A2E")
+            try:
+                rc.configure(fg_color=row_bg)
+                # update MSISDN (col 1) and TARIFF (col 5) text color
+                lbls[1].configure(text_color=txt_clr)
+                lbls[5].configure(text_color=txt_clr)
+            except Exception:
+                pass
 
     def _on_row_click(self, event):
-        idx = int(self._data_box.index(
-            f"@{event.x},{event.y}").split(".")[0])
-        data_idx = idx - 3
-        self._sel_row = (data_idx
-                         if 0 <= data_idx < len(self._test_data) else None)
-        self._render_data()
+        pass  # legacy
+
+    def _on_row_click_idx(self, idx):
+        self._sel_row = idx if 0 <= idx < len(self._test_data) else None
+        self._apply_row_selection()   # instant, no flicker
 
     def _delete_sel(self):
         if self._sel_row is None:
@@ -1397,7 +1709,6 @@ class TabActivation:
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
 
-        # ── Restore saved geometry for add dialog ──
         _add_win = load_section("add_dialog_window")
         _add_restored = False
         if _add_win:
@@ -1413,11 +1724,9 @@ class TabActivation:
 
         _style_dialog(dlg)
 
-        # ── Restore maximized state ──
         if _add_win and _add_win.get("maximized"):
             dlg.after(150, lambda: dlg.state("zoomed"))
 
-        # ── Save geometry on move/resize ──
         _add_geo_save_id = [None]
         _add_last_normal_geo = [dlg.geometry()]
 
@@ -1488,7 +1797,6 @@ class TabActivation:
                                 validate="key", validatecommand=sc_vcmd)
         sc_entry.pack(side="left", fill="x", expand=True)
 
-        # ── PLAN TYPE — overlay dropdown ──────────────
         pt_row = ctk.CTkFrame(frm, fg_color="transparent")
         pt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(pt_row, text="PLAN_TYPE", text_color=("#8B75B0", "#6B5A8A"),
@@ -1501,7 +1809,6 @@ class TabActivation:
         }
         PREPAID_CODE_MAP_LOCAL = {v: k for k, v in PREPAID_TARIFF_MAP.items()}
 
-        # ── TARIFF — overlay dropdown (rebuilt on plan change) ──
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
         tr_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
@@ -1511,7 +1818,7 @@ class TabActivation:
         _tr_state  = {"open": False}
         _tr_btns   = {}
         _tr_popup  = [None]
-        _tr_values = [list(POSTPAID_CODE_MAP.keys())]  # mutable ref
+        _tr_values = [list(POSTPAID_CODE_MAP.keys())]
 
         tr_trigger = ctk.CTkFrame(
             tr_row,
@@ -1557,7 +1864,7 @@ class TabActivation:
             tw = tr_trigger.winfo_width()
 
             vals     = _tr_values[0]
-            item_h   = 24
+            item_h   = 28
             max_show = 6
             n        = len(vals)
             list_h   = item_h * min(n, max_show) + 8
@@ -1596,29 +1903,26 @@ class TabActivation:
                 is_sel  = (v == cur)
                 fg_btn  = "#5C2483" if is_sel else bg
                 btn = tk.Button(
-                    container, text=f"  {v}", font=("Consolas", 10),
+                    container, text=f"  {v}", font=("Consolas", 13),
                     bg=fg_btn, fg="white",
                     activebackground="#3D2260", activeforeground="white",
-                    relief="flat", anchor="w", bd=0, padx=4, pady=2,
+                    relief="flat", anchor="w", bd=0, padx=4, pady=0,
                     cursor="hand2", command=lambda v=v: _tr_select(v))
-                btn.pack(fill="x", pady=1, padx=2)
+                btn.pack(fill="x", pady=0, padx=2, ipady=5)
                 def _oe(e, b=btn): b.configure(bg="#3D2260", fg="white")
                 def _ol(e, b=btn, s=is_sel): b.configure(bg="#5C2483" if s else bg, fg="white" if s else "#EDE8F5")
                 btn.bind("<Enter>", _oe)
                 btn.bind("<Leave>", _ol)
 
             def _on_tr_leave(e):
-                px = popup.winfo_rootx()
-                py = popup.winfo_rooty()
-                pw = popup.winfo_width()
-                ph = popup.winfo_height()
-                mx = popup.winfo_pointerx()
-                my = popup.winfo_pointery()
+                px = popup.winfo_rootx(); py = popup.winfo_rooty()
+                pw = popup.winfo_width(); ph = popup.winfo_height()
+                mx = popup.winfo_pointerx(); my = popup.winfo_pointery()
                 if not (px <= mx <= px + pw and py <= my <= py + ph):
                     _tr_close()
             popup.bind("<Leave>", _on_tr_leave)
 
-            _tr_popup[0]      = popup
+            _tr_popup[0] = popup
             tr_arr.configure(text="▴")
 
         def _tr_toggle(e=None):
@@ -1631,14 +1935,12 @@ class TabActivation:
         tr_lbl.bind("<Button-1>",     lambda e: (_tr_toggle(), "break"))
         tr_arr.bind("<Button-1>",     lambda e: (_tr_toggle(), "break"))
 
-        # ── TARIFF_TYPE — overlay dropdown ────────────
         tt_row = ctk.CTkFrame(frm, fg_color="transparent")
         tt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tt_row, text="TARIFF_TYPE", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
         tt_var = _mk_overlay_dd(tt_row, dlg, list(TARIFF_TYPE_MAP.keys()), "Individual")
 
-        # ── VOUCHER row (prepaid only) ─────────────────
         vc_row = ctk.CTkFrame(frm, fg_color="transparent")
         ctk.CTkLabel(vc_row, text="VOUCHER 🎟️", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
@@ -1665,14 +1967,10 @@ class TabActivation:
                 tr_var.set(first)
                 tr_lbl.configure(text=f"  {first}")
                 vc_row.pack_forget()
-            # close tariff popup if open
             _tr_close()
 
         pt_var = _mk_overlay_dd(pt_row, dlg, ["PostPaid", "Prepaid"], "PostPaid",
                                 on_change=_sync_plan)
-
-        # close all popups when clicking dialog background
-        # dlg Button-1 binding removed — it was closing popup on every click
 
         def save():
             row_data = {k: v.get().strip() for k, v in fields.items()}
@@ -1694,7 +1992,7 @@ class TabActivation:
             dlg.destroy()
 
         ctk.CTkButton(dlg, text=T("save"), fg_color=("#5C2483", "#5C2483"),
-                      hover_color=("#7C6EB0", "#7C6EB0"), font=("Segoe UI", 13, "bold"),
+                      hover_color=("#7C6EB0", "#7C6EB0"), font=("Segoe UI", 14, "bold"),
                       height=44, corner_radius=10, command=save
                       ).pack(fill="x", padx=16, pady=(0, 16))
 
@@ -1708,7 +2006,6 @@ class TabActivation:
         dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
         dlg.grab_set()
 
-        # ── Restore saved geometry for edit dialog ──
         _edit_win = load_section("edit_dialog_window")
         _edit_restored = False
         if _edit_win:
@@ -1724,11 +2021,9 @@ class TabActivation:
 
         _style_dialog(dlg)
 
-        # ── Restore maximized state ──
         if _edit_win and _edit_win.get("maximized"):
             dlg.after(150, lambda: dlg.state("zoomed"))
 
-        # ── Save geometry on move/resize ──
         _edit_geo_save_id = [None]
         _edit_last_normal_geo = [dlg.geometry()]
 
@@ -1819,15 +2114,12 @@ class TabActivation:
         init_plan_vals = list(PREPAID_CODE_MAP_E.keys()) if is_prepaid_now else list(POSTPAID_CODE_MAP_E.keys())
         _tr_values_e = [init_plan_vals]
 
-        # ── TARIFF — overlay dropdown ─────────────────
         tr_row = ctk.CTkFrame(frm, fg_color="transparent")
         tr_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tr_row, text="TARIFF", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
 
         tr_var = ctk.StringVar(value=init_tr)
-        _tr_state_e  = {"open": False}
-        _tr_btns_e   = {}
         _tr_popup_e  = [None]
 
         tr_trigger_e = ctk.CTkFrame(
@@ -1874,7 +2166,7 @@ class TabActivation:
             tw = tr_trigger_e.winfo_width()
 
             vals     = _tr_values_e[0]
-            item_h   = 24
+            item_h   = 28
             max_show = 6
             n        = len(vals)
             list_h   = item_h * min(n, max_show) + 8
@@ -1912,11 +2204,11 @@ class TabActivation:
             for v in vals:
                 is_sel  = (v == cur)
                 btn = tk.Button(
-                    container, text=f"  {v}", font=("Consolas", 10),
+                    container, text=f"  {v}", font=("Consolas", 13),
                     bg="#5C2483" if is_sel else bg,
                     fg="white",
                     activebackground="#3D2260", activeforeground="white",
-                    relief="flat", anchor="w", bd=0, padx=4, pady=2,
+                    relief="flat", anchor="w", bd=0, padx=4, pady=6,
                     cursor="hand2", command=lambda v=v: _tr_select_e(v))
                 btn.pack(fill="x", pady=1, padx=2)
                 def _oe(e, b=btn): b.configure(bg="#3D2260", fg="white")
@@ -1925,17 +2217,14 @@ class TabActivation:
                 btn.bind("<Leave>", _ol)
 
             def _on_tr_leave_e(e):
-                px = popup.winfo_rootx()
-                py = popup.winfo_rooty()
-                pw = popup.winfo_width()
-                ph = popup.winfo_height()
-                mx = popup.winfo_pointerx()
-                my = popup.winfo_pointery()
+                px = popup.winfo_rootx(); py = popup.winfo_rooty()
+                pw = popup.winfo_width(); ph = popup.winfo_height()
+                mx = popup.winfo_pointerx(); my = popup.winfo_pointery()
                 if not (px <= mx <= px + pw and py <= my <= py + ph):
                     _tr_close_e()
             popup.bind("<Leave>", _on_tr_leave_e)
 
-            _tr_popup_e[0]      = popup
+            _tr_popup_e[0] = popup
             tr_arr_e.configure(text="▴")
 
         def _tr_toggle_e(e=None):
@@ -1948,13 +2237,11 @@ class TabActivation:
         tr_lbl_e.bind("<Button-1>",     lambda e: (_tr_toggle_e(), "break"))
         tr_arr_e.bind("<Button-1>",     lambda e: (_tr_toggle_e(), "break"))
 
-        # ── PLAN TYPE ─────────────────────────────────
         pt_row = ctk.CTkFrame(frm, fg_color="transparent")
         pt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(pt_row, text="PLAN_TYPE", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
 
-        # ── TARIFF_TYPE ───────────────────────────────
         tt_row = ctk.CTkFrame(frm, fg_color="transparent")
         tt_row.pack(fill="x", padx=12, pady=5)
         ctk.CTkLabel(tt_row, text="TARIFF_TYPE", text_color=("#8B75B0", "#6B5A8A"),
@@ -1962,7 +2249,6 @@ class TabActivation:
         tt_var = _mk_overlay_dd(tt_row, dlg, list(TARIFF_TYPE_MAP.keys()),
                                 TARIFF_TYPE_RMAP.get(d.get("TARIFF_TYPE", "flat"), "Individual"))
 
-        # ── VOUCHER ───────────────────────────────────
         vc_row_e = ctk.CTkFrame(frm, fg_color="transparent")
         ctk.CTkLabel(vc_row_e, text="VOUCHER 🎟️", text_color=("#8B75B0", "#6B5A8A"),
                      font=FONT_LABEL, width=120, anchor="w").pack(side="left")
@@ -1999,8 +2285,6 @@ class TabActivation:
         if is_prepaid_now:
             vc_row_e.pack(fill="x", padx=12, pady=5)
 
-        # dlg Button-1 binding removed — it was closing popup on every click
-
         def save():
             row_data = {k: v.get().strip() for k, v in fields.items()}
             row_data["SIMCARD"]       = sc_entry.get().strip()
@@ -2022,6 +2306,6 @@ class TabActivation:
 
         ctk.CTkButton(dlg, text="✎  Yadda Saxla", fg_color="#B45309",
                       hover_color="#92400E", text_color="white",
-                      font=("Segoe UI", 13, "bold"),
+                      font=("Segoe UI", 14, "bold"),
                       height=44, corner_radius=10, command=save
                       ).pack(fill="x", padx=16, pady=(0, 16))

@@ -472,7 +472,7 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
 
             btn = tk.Button(
                 container, text=f"  {v}",
-                font=("Consolas", 10),
+                font=("Consolas", 13),
                 bg=fg_btn, fg="white",
                 activebackground="#3D2260", activeforeground="white",
                 relief="flat", anchor="w", bd=0, padx=4, pady=2,
@@ -558,7 +558,7 @@ class TabPlanning:
             text="📄  CSV files are generated automatically\n"
                  "    from the data table on the right.\n"
                  "    No manual file preparation needed.",
-            font=("Segoe UI", 10),
+            font=("Segoe UI", 12),
             text_color=("#8B75B0", "#6B5A8A"),
             justify="left"
         ).pack(padx=14, pady=10, anchor="w")
@@ -600,7 +600,7 @@ class TabPlanning:
         th.pack_propagate(False)
 
         mk_label(th, "📋  PLANNING DATA", color=C["muted"],
-                 font=("Segoe UI", 11, "bold")).pack(side="left", padx=18, pady=14)
+                 font=("Segoe UI", 14, "bold")).pack(side="left", padx=18, pady=14)
 
         self._td_count = mk_label(
             th, f"0 {T('rows')}", color=C["accent"], font=FONT_MONO_S)
@@ -608,14 +608,14 @@ class TabPlanning:
 
         ctk.CTkButton(
             th, text=T("delete"), width=70, height=30,
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 14, "bold"),
             fg_color=("#EF4444", "#DC2626"), hover_color="#B91C1C",
             corner_radius=8, command=self._delete_sel
         ).pack(side="right", pady=10)
 
         ctk.CTkButton(
             th, text="✎  Edit", width=80, height=30,
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 14, "bold"),
             fg_color="#B45309", hover_color="#92400E",
             text_color="white", corner_radius=8,
             command=self._open_edit
@@ -623,19 +623,55 @@ class TabPlanning:
 
         ctk.CTkButton(
             th, text=T("add"), width=90, height=30,
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 14, "bold"),
             fg_color=("#5C2483", "#5C2483"), hover_color=("#7C6EB0", "#7C6EB0"),
             corner_radius=8, command=self._open_add
         ).pack(side="right", padx=6, pady=10)
 
-        self._data_box = ctk.CTkTextbox(
-            right, font=FONT_MONO_S,
-            fg_color=("#1C1030", "#FFFFFF"),
-            text_color=("#EDE8F5", "#1A0A2E"),
-            border_color=("#3D2260", "#C4B0DC"),
-            border_width=1, corner_radius=12, wrap="none")
-        self._data_box.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
-        self._data_box.bind("<Button-1>", self._on_row_click)
+        # ── Canvas-based data table ────────────────────
+        import tkinter as _tk2
+
+        _tbl_outer = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"),
+                                  corner_radius=12, border_width=1,
+                                  border_color=("#3D2260", "#C4B0DC"))
+        _tbl_outer.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+        _tbl_outer.columnconfigure(0, weight=1)
+        _tbl_outer.rowconfigure(1, weight=1)
+
+        _col_hdr = ctk.CTkFrame(_tbl_outer, fg_color=("#251540", "#DDD5EE"),
+                                corner_radius=0, height=32)
+        _col_hdr.grid(row=0, column=0, columnspan=2, sticky="ew", padx=1, pady=(1,0))
+        _col_hdr.pack_propagate(False)
+        _COLS = [("#",28),("MSISDN",100),("SIMCARD",170),("PLAN",82),
+                 ("USAGE",60),("SEG",44),("PRICE",70),("PUB",40),("TYPE",90),("TARIFF",0)]
+        for _cn, _cw in _COLS:
+            ctk.CTkLabel(_col_hdr, text=_cn, font=("Segoe UI", 12,"bold"),
+                         text_color=("#8B75B0","#6B5A8A"),
+                         width=_cw or 0, anchor="w").pack(
+                side="left", padx=(10 if _cn=="#" else 6, 2),
+                fill="x" if not _cw else None, expand=(not _cw))
+
+        _db_canvas = _tk2.Canvas(_tbl_outer, bg="#1C1030", highlightthickness=0, bd=0)
+        _db_canvas.grid(row=1, column=0, sticky="nsew")
+        _db_sb = ctk.CTkScrollbar(_tbl_outer, orientation="vertical",
+                                  command=_db_canvas.yview,
+                                  button_color=("#3D2260","#C4B0DC"),
+                                  button_hover_color=("#7C6EB0","#7C6EB0"))
+        _db_sb.grid(row=1, column=1, sticky="ns", pady=(0,1))
+        _db_canvas.configure(yscrollcommand=_db_sb.set)
+        _db_inner = ctk.CTkFrame(_db_canvas, fg_color=("#1C1030","#FFFFFF"), corner_radius=0)
+        _db_inner_id = _db_canvas.create_window((0,0), window=_db_inner, anchor="nw")
+        def _db_on_inner(e=None): _db_canvas.configure(scrollregion=_db_canvas.bbox("all"))
+        def _db_on_canvas(e=None): _db_canvas.itemconfig(_db_inner_id, width=_db_canvas.winfo_width())
+        _db_inner.bind("<Configure>", _db_on_inner)
+        _db_canvas.bind("<Configure>", _db_on_canvas)
+        def _db_mw(e): _db_canvas.yview_scroll(int(-1*(e.delta/120)), "units")
+        _db_canvas.bind("<MouseWheel>", _db_mw)
+        _db_inner.bind("<MouseWheel>", _db_mw)
+
+        self._data_box   = None
+        self._db_canvas  = _db_canvas
+        self._db_inner   = _db_inner
         self._render_data()
 
         sh = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"),
@@ -643,9 +679,9 @@ class TabPlanning:
         sh.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         sh.pack_propagate(False)
         mk_label(sh, T("np_journal"), color=C["muted"],
-                 font=("Segoe UI", 11, "bold")).pack(side="left", padx=18, pady=14)
+                 font=("Segoe UI", 14, "bold")).pack(side="left", padx=18, pady=14)
         self._status_lbl = ctk.CTkLabel(
-            sh, text=T("ready"), font=("Consolas", 11, "bold"),
+            sh, text=T("ready"), font=("Consolas", 13, "bold"),
             text_color=("#22C55E", "#16A34A"), fg_color="#0B2210", corner_radius=8)
         self._status_lbl.pack(side="right", padx=18, pady=14)
 
@@ -690,42 +726,90 @@ class TabPlanning:
 
     # ── Data table ─────────────────────────────────────
     def _render_data(self):
-        self._data_box.configure(state="normal")
-        self._data_box.delete("1.0", "end")
-        self._data_box.tag_config("header",   foreground=C["muted"])
-        self._data_box.tag_config("selected", background="#3D1A6B")
+        if not hasattr(self, "_db_inner") or self._db_inner is None:
+            return
+        import tkinter as _tk3
+        import customtkinter as _ctk
 
-        hdr = (f"{'#':<3}  {'MSISDN':<12}  {'SIMCARD':<22}  "
-               f"{'PLAN':<9}  {'USAGE':<6}  {'SEG':<5}  "
-               f"{'PRICE':<8}  {'PUB':<4}  {'TYPE':<10}  {'TARIFF'}\n")
-        self._data_box.insert("end", hdr, "header")
-        self._data_box.insert("end", "─" * 108 + "\n", "header")
+        for w in self._db_inner.winfo_children():
+            w.destroy()
+        if hasattr(self, "_db_canvas"):
+            self._db_canvas.yview_moveto(0)
 
-        for i, d in enumerate(self._data, 1):
-            line = (
-                f"{i:<3}  "
-                f"{d.get('MSISDN',''):<12}  "
-                f"{d.get('SIMCARD',''):<22}  "
-                f"{d.get('PLAN_TYPE',''):<9}  "
-                f"{d.get('USAGE','VOICE'):<6}  "
-                f"{d.get('SEGMENT','2'):<5}  "
-                f"{d.get('PRICE',''):<8}  "
-                f"{d.get('PUBLIC','0'):<4}  "
-                f"{d.get('NUMBER_TYPE','EXTERNAL'):<10}  "
-                f"{d.get('UPDATE_TARIFF','normal')}\n"
-            )
-            self._data_box.insert(
-                "end", line,
-                "selected" if self._sel_row == i - 1 else "")
+        self._db_rows = []
+        COL_W = [28, 100, 170, 82, 60, 44, 70, 40, 90, 0]
+        muted = ("#8B75B0","#6B5A8A")
 
-        self._data_box.configure(state="disabled")
+        for i, d in enumerate(self._data):
+            if i > 0:
+                _tk3.Frame(self._db_inner, bg="#2A1A45", height=1).pack(fill="x")
+
+            is_even = (i % 2 == 0)
+            norm_bg = "#1C1030" if is_even else "#160C28"
+
+            plan     = d.get("PLAN_TYPE","")
+            plan_clr = ("#22C55E","#16A34A") if plan.lower()=="postpaid" else ("#F59E0B","#D97706")
+
+            rc = _ctk.CTkFrame(self._db_inner, fg_color=norm_bg,
+                               corner_radius=0, height=38)
+            rc.pack(fill="x")
+            rc.pack_propagate(False)
+
+            cells = [
+                (str(i+1),                        COL_W[0], ("Consolas", 13),        muted),
+                (d.get("MSISDN",""),               COL_W[1], ("Consolas", 13,"bold"), ("#EDE8F5","#1A0A2E")),
+                (d.get("SIMCARD",""),              COL_W[2], ("Consolas", 13),        muted),
+                (plan,                             COL_W[3], ("Consolas", 13,"bold"), plan_clr),
+                (d.get("USAGE","VOICE"),           COL_W[4], ("Consolas", 13),        muted),
+                (d.get("SEGMENT","2"),             COL_W[5], ("Consolas", 13),        muted),
+                (d.get("PRICE",""),                COL_W[6], ("Consolas", 13),        muted),
+                (d.get("PUBLIC","0"),              COL_W[7], ("Consolas", 13),        muted),
+                (d.get("NUMBER_TYPE","EXTERNAL"),  COL_W[8], ("Consolas", 13),        muted),
+                (d.get("UPDATE_TARIFF","normal"),  COL_W[9], ("Consolas", 13),        ("#EDE8F5","#1A0A2E")),
+            ]
+
+            lbls = []
+            for ci, (val, cw, fnt, clr) in enumerate(cells):
+                px = (10, 2) if ci == 0 else (6, 2)
+                lbl = _ctk.CTkLabel(rc, text=val, font=fnt, text_color=clr,
+                                    width=cw or 0, anchor="w")
+                lbl.pack(side="left", padx=px,
+                         fill="x" if not cw else None, expand=(not cw))
+                lbls.append(lbl)
+
+            self._db_rows.append((rc, norm_bg, lbls))
+
+            def _bind_row(widget, idx=i):
+                widget.bind("<Button-1>",
+                            lambda e, x=idx: self._on_row_click_idx(x))
+                widget.bind("<MouseWheel>",
+                            lambda e: self._db_canvas.yview_scroll(
+                                int(-1*(e.delta/120)), "units"))
+            _bind_row(rc)
+            for lbl in lbls:
+                _bind_row(lbl)
+
         self._td_count.configure(text=f"{len(self._data)} {self._T('rows')}")
+        self._apply_row_selection()
+
+    def _apply_row_selection(self):
+        if not hasattr(self, "_db_rows"):
+            return
+        for i, (rc, norm_bg, lbls) in enumerate(self._db_rows):
+            is_sel = (self._sel_row == i)
+            try:
+                rc.configure(fg_color="#3D1A6B" if is_sel else norm_bg)
+                lbls[1].configure(text_color=("#C4B0DC","#1A0A2E") if is_sel else ("#EDE8F5","#1A0A2E"))
+                lbls[9].configure(text_color=("#C4B0DC","#1A0A2E") if is_sel else ("#EDE8F5","#1A0A2E"))
+            except Exception:
+                pass
 
     def _on_row_click(self, event):
-        idx      = int(self._data_box.index(f"@{event.x},{event.y}").split(".")[0])
-        data_idx = idx - 3
-        self._sel_row = data_idx if 0 <= data_idx < len(self._data) else None
-        self._render_data()
+        pass  # legacy
+
+    def _on_row_click_idx(self, idx):
+        self._sel_row = idx if 0 <= idx < len(self._data) else None
+        self._apply_row_selection()
 
     def _delete_sel(self):
         if self._sel_row is None:
@@ -925,7 +1009,7 @@ class TabPlanning:
             text="✎  Save Changes" if is_edit else T("save"),
             fg_color="#B45309" if is_edit else "#5C2483",
             hover_color="#92400E" if is_edit else "#7C6EB0",
-            text_color="white", font=("Segoe UI", 13, "bold"),
+            text_color="white", font=("Segoe UI", 14, "bold"),
             height=44, corner_radius=10, command=save
         ).pack(fill="x", padx=16, pady=(0, 16))
 

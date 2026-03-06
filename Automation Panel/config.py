@@ -353,11 +353,11 @@ PAYMENT_MAP = {1: "PostPaid", 2: "Prepaid"}
 # ══════════════════════════════════════════════════════
 #  FONTS
 # ══════════════════════════════════════════════════════
-FONT_MONO    = ("Consolas", 12)
-FONT_MONO_S  = ("Consolas", 11)
-FONT_UI      = ("Segoe UI", 13)
-FONT_UI_B    = ("Segoe UI", 13, "bold")
-FONT_HEAD    = ("Segoe UI", 19, "bold")
-FONT_LABEL   = ("Segoe UI", 11)
-FONT_SECTION = ("Segoe UI", 10, "bold")
-FONT_TAB     = ("Segoe UI", 13, "bold")
+FONT_MONO    = ("Consolas", 13)
+FONT_MONO_S  = ("Consolas", 13)
+FONT_UI      = ("Segoe UI", 14)
+FONT_UI_B    = ("Segoe UI", 14, "bold")
+FONT_HEAD    = ("Segoe UI", 20, "bold")
+FONT_LABEL   = ("Segoe UI", 13)
+FONT_SECTION = ("Segoe UI", 11, "bold")
+FONT_TAB     = ("Segoe UI", 14, "bold")

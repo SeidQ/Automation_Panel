@@ -201,7 +201,11 @@ class App(ctk.CTk):
             self._log_q, self._res_q, self._stop_ev, T)
         self._tab_ms = TabMSISDN(
             self._tabview.tab(T("tab_msisdn")), T)
-        self.after(100, self._on_tab_change)
+        # Pre-render ALL tabs at startup so first switch is instant
+        self.after(80,  lambda: self._tabview.set(T("tab_activation")))
+        self.after(160, lambda: self._tabview.set(T("tab_msisdn")))
+        self.after(240, lambda: self._tabview.set(T("tab_planning")))
+        self.after(320, self._on_tab_change)
 
         # ── Footer ────────────────────────────────────
         footer = ctk.CTkFrame(outer, fg_color="#1C1030",
@@ -228,6 +232,27 @@ class App(ctk.CTk):
                 state="normal"       if is_act else "disabled",
                 text_color="#EDE8F5" if is_act else "#8B75B0",
                 fg_color="#3D2260"   if is_act else "#251540")
+        except Exception:
+            pass
+        # Pre-render the active tab so it appears instantly
+        self.after(5, self._warm_tab)
+
+    def _warm_tab(self):
+        try:
+            self.update_idletasks()
+            name = self._tabview.get()
+            # Force canvas geometry recalc on activation tab
+            if name == T("tab_activation") and self._tab_act:
+                for attr in ("_db_canvas",):
+                    c = getattr(self._tab_act, attr, None)
+                    if c and c.winfo_exists():
+                        c.update_idletasks()
+                        c.event_generate("<Configure>")
+            elif name == T("tab_planning") and self._tab_plan:
+                c = getattr(self._tab_plan, "_db_canvas", None)
+                if c and c.winfo_exists():
+                    c.update_idletasks()
+                    c.event_generate("<Configure>")
         except Exception:
             pass
 
