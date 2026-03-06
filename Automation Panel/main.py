@@ -283,20 +283,29 @@ class App(ctk.CTk):
         win.transient(self)
         win.lift()
         win.focus_force()
-        try:
-            import os as _os
-            _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
-            if _os.path.exists(_ico):
-                win.iconbitmap(_ico)
-        except Exception:
-            pass
-        try:
-            from ctypes import windll, byref, sizeof, c_int
-            win.update_idletasks()
-            hwnd = windll.user32.GetParent(win.winfo_id())
-            windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
-        except Exception:
-            pass
+        import os as _os
+        _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
+        _ico = _ico if _os.path.exists(_ico) else None
+
+        def _apply_win_style():
+            try:
+                if _ico:
+                    win.iconbitmap(_ico)
+            except Exception:
+                pass
+            try:
+                from ctypes import windll, byref, sizeof, c_int
+                win.update_idletasks()
+                hwnd = windll.user32.GetParent(win.winfo_id())
+                windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
+            except Exception:
+                pass
+
+        # Apply immediately and re-apply to beat CTk delayed icon-reset calls
+        _apply_win_style()
+        win.after(10,  _apply_win_style)
+        win.after(100, _apply_win_style)
+        win.after(300, _apply_win_style)
         win.minsize(820, 500)
         self.update_idletasks()
         px, py = self.winfo_rootx(), self.winfo_rooty()

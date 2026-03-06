@@ -29,26 +29,31 @@ def _center_on_parent(dlg, parent, w=480, h=600):
 
 
 def _style_dialog(dlg):
-    """Dark title bar + app icon — no flicker."""
+    """Dark title bar + app icon. Re-applies icon at multiple delays to
+    override CTk's own after() calls that reset it to the blue default."""
     import os as _os
     _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
     _ico = _ico if _os.path.exists(_ico) else None
 
-    # Hide window, apply icon+titlebar, then show — prevents default icon flash
-    dlg.withdraw()
-    try:
-        if _ico:
-            dlg.iconbitmap(_ico)
-    except Exception:
-        pass
-    try:
-        from ctypes import windll, byref, sizeof, c_int
-        dlg.update_idletasks()
-        hwnd = windll.user32.GetParent(dlg.winfo_id())
-        windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
-    except Exception:
-        pass
-    dlg.deiconify()
+    def _apply():
+        try:
+            if _ico:
+                dlg.iconbitmap(_ico)
+        except Exception:
+            pass
+        try:
+            from ctypes import windll, byref, sizeof, c_int
+            dlg.update_idletasks()
+            hwnd = windll.user32.GetParent(dlg.winfo_id())
+            windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
+        except Exception:
+            pass
+
+    # Apply immediately and then beat CTk's delayed icon-reset calls
+    _apply()
+    dlg.after(10,  _apply)
+    dlg.after(100, _apply)
+    dlg.after(300, _apply)
 
 # ══════════════════════════════════════════════════════
 #  PIPELINE STEPS
