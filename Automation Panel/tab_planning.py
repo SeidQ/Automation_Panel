@@ -371,7 +371,7 @@ def _style_dialog(dlg):
 # ══════════════════════════════════════════════════════
 def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
     """
-    Dropdown using a borderless Toplevel popup window.
+    Clean scrollable dropdown using a borderless Toplevel popup.
     Never pushes sibling widgets. Returns a StringVar.
     """
     import tkinter as tk
@@ -419,88 +419,124 @@ def _mk_overlay_dd(parent_row, dlg, values, default="", on_change=None):
             on_change(v)
 
     def _open():
-        _close()  # close existing first
-        dlg.update_idletasks()
+        _close()
 
-        # Absolute screen coordinates
-        rx = trigger.winfo_rootx()
-        ry = trigger.winfo_rooty() + trigger.winfo_height()
-        tw = trigger.winfo_width()
+        def _do_open():
+            dlg.update_idletasks()
 
-        item_h   = 24
-        max_show = 6
-        n        = len(values)
-        list_h   = item_h * min(n, max_show) + 8
+            # Reliable width: parent_row width minus label column
+            try:
+                row_w = parent_row.winfo_width()
+                tw = max(row_w - 130 - 16, 140)
+            except Exception:
+                tw = max(trigger.winfo_width(), 140)
 
-        # Borderless Toplevel
-        popup = tk.Toplevel(dlg)
-        popup.wm_overrideredirect(True)
-        popup.wm_geometry(f"{tw}x{list_h}+{rx}+{ry}")
-        popup.lift()
-        popup.focus_set()
+            rx = trigger.winfo_rootx()
+            ry = trigger.winfo_rooty() + trigger.winfo_height()
 
-        # Dark background frame inside toplevel
-        bg = "#251540"
-        frame = tk.Frame(popup, bg=bg, bd=1, relief="solid",
-                         highlightbackground="#5C2483", highlightthickness=1)
-        frame.pack(fill="both", expand=True)
+            ITEM_H   = 26   # height per item
+            MAX_VIS  = 7    # max visible items before scroll
+            n        = len(values)
+            vis      = min(n, MAX_VIS)
+            popup_h  = ITEM_H * vis + 2  # +2 for border
 
-        # Scrollable if needed — no scrollbar, mousewheel only
-        if n > max_show:
-            canvas = tk.Canvas(frame, bg=bg, highlightthickness=0,
-                               width=tw - 4, height=list_h - 8)
-            canvas.pack(fill="both", expand=True)
-            inner = tk.Frame(canvas, bg=bg)
-            canvas_win = canvas.create_window((0, 0), window=inner, anchor="nw")
-            def _on_resize(e):
+            popup = tk.Toplevel(dlg)
+            popup.wm_overrideredirect(True)
+            popup.wm_geometry(f"{tw}x{popup_h}+{rx}+{ry}")
+            popup.lift()
+            popup.focus_set()
+            popup.configure(bg="#3D2260")
+
+            # Outer border frame
+            outer = tk.Frame(popup, bg="#5C2483", bd=0)
+            outer.pack(fill="both", expand=True, padx=1, pady=1)
+
+            # Scrollable canvas
+            canvas = tk.Canvas(outer, bg="#1E1035", highlightthickness=0, bd=0)
+            canvas.pack(side="left", fill="both", expand=True)
+
+            # Scrollbar — only shown when needed
+            if n > MAX_VIS:
+                sb = tk.Scrollbar(outer, orient="vertical",
+                                  command=canvas.yview,
+                                  troughcolor="#251540",
+                                  bg="#5C2483", activebackground="#7C6EB0",
+                                  width=8, bd=0, relief="flat",
+                                  elementborderwidth=0, highlightthickness=0)
+                sb.pack(side="right", fill="y")
+                canvas.configure(yscrollcommand=sb.set)
+
+            inner = tk.Frame(canvas, bg="#1E1035")
+            win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+            def _on_inner_cfg(e):
                 canvas.configure(scrollregion=canvas.bbox("all"))
-                canvas.itemconfig(canvas_win, width=canvas.winfo_width())
-            inner.bind("<Configure>", _on_resize)
+                canvas.itemconfig(win_id, width=canvas.winfo_width())
+            def _on_canvas_cfg(e):
+                canvas.itemconfig(win_id, width=canvas.winfo_width())
+            inner.bind("<Configure>", _on_inner_cfg)
+            canvas.bind("<Configure>", _on_canvas_cfg)
+
             def _on_wheel(e):
                 canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
             canvas.bind_all("<MouseWheel>", _on_wheel)
             popup.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
-            container = inner
-        else:
-            container = frame
 
-        cur = var.get()
-        for v in values:
-            is_sel = (v == cur)
-            fg_btn  = "#5C2483" if is_sel else bg
-            fg_text = "white"   if is_sel else "#EDE8F5"
+            # Items
+            cur = var.get()
+            for v in values:
+                is_sel = (v == cur)
+                bg_btn = "#5C2483" if is_sel else "#1E1035"
+                fg_txt = "#FFFFFF" if is_sel else "#C4B0DC"
 
-            btn = tk.Button(
-                container, text=f"  {v}",
-                font=("Consolas", 13),
-                bg=fg_btn, fg="white",
-                activebackground="#3D2260", activeforeground="white",
-                relief="flat", anchor="w", bd=0, padx=4, pady=2,
-                cursor="hand2",
-                command=lambda v=v: _select(v))
-            btn.pack(fill="x", pady=1, padx=2)
+                row = tk.Frame(inner, bg=bg_btn, cursor="hand2")
+                row.pack(fill="x", pady=0)
 
-            def _on_enter(e, b=btn, v=v):
-                b.configure(bg="#3D2260", fg="white")
-            def _on_leave(e, b=btn, v=v, sel=(v == cur)):
-                b.configure(bg="#5C2483" if sel else bg, fg="white" if sel else "#EDE8F5")
-            btn.bind("<Enter>", _on_enter)
-            btn.bind("<Leave>", _on_leave)
+                item_lbl = tk.Label(
+                    row, text=v,
+                    font=("Segoe UI", 11),
+                    bg=bg_btn, fg=fg_txt,
+                    anchor="w", padx=12, pady=0,
+                    cursor="hand2")
+                item_lbl.pack(fill="x", ipady=4)
 
-        # Close when clicking outside
-        def _on_popup_leave(e):
-            px = popup.winfo_rootx()
-            py = popup.winfo_rooty()
-            pw = popup.winfo_width()
-            ph = popup.winfo_height()
-            mx = popup.winfo_pointerx()
-            my = popup.winfo_pointery()
-            if not (px <= mx <= px + pw and py <= my <= py + ph):
-                _close()
-        popup.bind("<Leave>", _on_popup_leave)
+                def _on_enter(e, r=row, l=item_lbl):
+                    r.configure(bg="#3D2260")
+                    l.configure(bg="#3D2260", fg="#FFFFFF")
+                def _on_leave(e, r=row, l=item_lbl, s=is_sel):
+                    c = "#5C2483" if s else "#1E1035"
+                    r.configure(bg=c)
+                    l.configure(bg=c, fg="#FFFFFF" if s else "#C4B0DC")
+                def _on_click(e, v=v):
+                    _select(v)
 
-        _popup[0] = popup
-        arr.configure(text="▴")
+                row.bind("<Enter>", _on_enter)
+                row.bind("<Leave>", _on_leave)
+                row.bind("<Button-1>", _on_click)
+                item_lbl.bind("<Enter>", _on_enter)
+                item_lbl.bind("<Leave>", _on_leave)
+                item_lbl.bind("<Button-1>", _on_click)
+
+                # Thin separator
+                sep = tk.Frame(inner, bg="#2D1A50", height=1)
+                sep.pack(fill="x")
+
+            # Close on click outside
+            def _check_outside(e):
+                try:
+                    px, py = popup.winfo_rootx(), popup.winfo_rooty()
+                    pw, ph = popup.winfo_width(), popup.winfo_height()
+                    mx, my = popup.winfo_pointerx(), popup.winfo_pointery()
+                    if not (px <= mx <= px + pw and py <= my <= py + ph):
+                        _close()
+                except Exception:
+                    _close()
+            popup.bind("<Leave>", _check_outside)
+
+            _popup[0] = popup
+            arr.configure(text="▴")
+
+        dlg.after(1, _do_open)
 
     def _toggle(e=None):
         if _popup[0] is not None:
@@ -544,6 +580,7 @@ class TabPlanning:
             scrollbar_button_color=("#3D2260", "#C4B0DC"),
             scrollbar_button_hover_color=("#7C6EB0", "#7C6EB0"))
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        self._left_panel = left
 
         mk_panel_header(left, T("config"))
         mk_section(left, T("login_express"))
@@ -593,6 +630,7 @@ class TabPlanning:
         right.columnconfigure(0, weight=1)
         right.rowconfigure(1, weight=2)
         right.rowconfigure(3, weight=3)
+        self._right_panel = right
 
         th = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"),
                           corner_radius=12, height=52)

@@ -5,7 +5,7 @@
     "ph1p": "10",
     "ph1n": "2210462",
     "email": "sgaziyev@azercell.com",
-    "mode": "serial",
+    "mode": "parallel",
     "test_data": [
       {
         "MSISDN": "102989000",

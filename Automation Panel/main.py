@@ -201,11 +201,9 @@ class App(ctk.CTk):
             self._log_q, self._res_q, self._stop_ev, T)
         self._tab_ms = TabMSISDN(
             self._tabview.tab(T("tab_msisdn")), T)
-        # Pre-render ALL tabs at startup so first switch is instant
-        self.after(80,  lambda: self._tabview.set(T("tab_activation")))
-        self.after(160, lambda: self._tabview.set(T("tab_msisdn")))
-        self.after(240, lambda: self._tabview.set(T("tab_planning")))
-        self.after(320, self._on_tab_change)
+        # NOTE: No startup tab pre-visiting needed — _warm_tab handles
+        # render on first switch via <Map> event + update_idletasks.
+
 
         # ── Footer ────────────────────────────────────
         footer = ctk.CTkFrame(outer, fg_color="#1C1030",
@@ -235,24 +233,39 @@ class App(ctk.CTk):
         except Exception:
             pass
         # Pre-render the active tab so it appears instantly
-        self.after(5, self._warm_tab)
+        self.after(0, self._warm_tab)
 
     def _warm_tab(self):
         try:
-            self.update_idletasks()
             name = self._tabview.get()
-            # Force canvas geometry recalc on activation tab
-            if name == T("tab_activation") and self._tab_act:
-                for attr in ("_db_canvas",):
-                    c = getattr(self._tab_act, attr, None)
-                    if c and c.winfo_exists():
-                        c.update_idletasks()
-                        c.event_generate("<Configure>")
-            elif name == T("tab_planning") and self._tab_plan:
-                c = getattr(self._tab_plan, "_db_canvas", None)
+            tab_frame = self._tabview.tab(name)
+
+            if name == T("tab_planning") and self._tab_plan:
+                tp = self._tab_plan
+                # Re-apply grid config and re-grid top-level panels.
+                # CTkTabview hides tabs via grid_remove(); when tab becomes
+                # visible grid weights are lost. Re-applying them fixes the
+                # blank tab on first visit without switching away.
+                tab_frame.columnconfigure(0, weight=3)
+                tab_frame.columnconfigure(1, weight=5)
+                tab_frame.rowconfigure(0, weight=1)
+                lp = getattr(tp, "_left_panel", None)
+                rp = getattr(tp, "_right_panel", None)
+                if lp and lp.winfo_exists():
+                    lp.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+                if rp and rp.winfo_exists():
+                    rp.grid(row=0, column=1, sticky="nsew")
+                tab_frame.update_idletasks()
+                c = getattr(tp, "_db_canvas", None)
                 if c and c.winfo_exists():
-                    c.update_idletasks()
                     c.event_generate("<Configure>")
+
+            elif name == T("tab_activation") and self._tab_act:
+                tab_frame.update_idletasks()
+                c = getattr(self._tab_act, "_db_canvas", None)
+                if c and c.winfo_exists():
+                    c.event_generate("<Configure>")
+
         except Exception:
             pass
 
