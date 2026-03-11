@@ -753,15 +753,27 @@
         "NUMBER_TYPE": "EXTERNAL",
         "DESCRIPTION": "",
         "UPDATE_TARIFF": "normal"
+      },
+      {
+        "MSISDN": "102989142",
+        "SIMCARD": "89994012411010160888",
+        "PLAN_TYPE": "Prepaid",
+        "USAGE": "DATA",
+        "SEGMENT": "1",
+        "PRICE": "",
+        "PUBLIC": "0",
+        "NUMBER_TYPE": "EXTERNAL",
+        "DESCRIPTION": "",
+        "UPDATE_TARIFF": "normal"
       }
     ]
   },
   "window": {
-    "geometry": "1920x1009+-28+27",
+    "geometry": "1920x1009+1881+57",
     "maximized": true
   },
   "np_add_dialog_window": {
-    "geometry": "520x680+364+25",
+    "geometry": "520x680+2837+221",
     "maximized": false
   },
   "np_edit_dialog_window": {

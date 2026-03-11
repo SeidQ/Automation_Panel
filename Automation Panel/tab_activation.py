@@ -473,6 +473,17 @@ class MsisdnCard:
                                     text_color=("#8B75B0", "#6B5A8A"), anchor="w")
         self._detail.pack(fill="x", padx=14, pady=(0, 10))
 
+    def bind_scroll(self, scroll_fn):
+        """Bind mousewheel on all widgets in this card to scroll_fn."""
+        def _bind_all(widget):
+            try:
+                widget.bind("<MouseWheel>", lambda e: scroll_fn(e), add="+")
+            except Exception:
+                pass
+            for child in widget.winfo_children():
+                _bind_all(child)
+        _bind_all(self._frame)
+
     def update_step(self, step_idx, msg, level, done=False, error=False):
         for i, (icon, lbl, icon_char) in enumerate(self._step_widgets):
             if i < step_idx:
@@ -707,6 +718,31 @@ class TabActivation:
         # History pagination state
         self._hist_page = 1
         self._build()
+
+    # ══════════════════════════════════════════════════
+    #  CONSOLE MOUSEWHEEL FIX
+    # ══════════════════════════════════════════════════
+    def _get_console_scroll_fn(self):
+        """Return a scroll function that targets the console's internal canvas."""
+        try:
+            canvas = self._console._parent_canvas
+            return lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        except Exception:
+            return None
+
+    def _bind_console_mousewheel(self, widget):
+        """Recursively bind mousewheel on widget and all children to console scroll."""
+        scroll_fn = self._get_console_scroll_fn()
+        if scroll_fn is None:
+            return
+        def _bind_all(w):
+            try:
+                w.bind("<MouseWheel>", lambda e: scroll_fn(e), add="+")
+            except Exception:
+                pass
+            for child in w.winfo_children():
+                _bind_all(child)
+        _bind_all(widget)
 
     def _build(self):
         T   = self._T
@@ -1004,6 +1040,9 @@ class TabActivation:
                              text_color=("#EF4444", "#DC2626"), anchor="w"
                              ).pack(side="left", padx=8, pady=9, fill="x", expand=True)
 
+        # ── FIX: bind mousewheel for all summary rows ──
+        self._console.after(50, lambda: self._bind_console_mousewheel(self._console))
+
     # ══════════════════════════════════════════════════
     #  RUN / CANCEL
     # ══════════════════════════════════════════════════
@@ -1033,6 +1072,13 @@ class TabActivation:
             steps = STEPS_PREPAID if d.get("PLAN_TYPE", "").lower() == "prepaid" else STEPS_POSTPAID
             card  = MsisdnCard(self._console, d["MSISDN"], d["PLAN_TYPE"], tt, i, steps=steps)
             self._cards[d["MSISDN"]] = card
+            # ── FIX: bind mousewheel so scrolling works when mouse is over cards ──
+            try:
+                sf_canvas = self._console._parent_canvas
+                card.bind_scroll(
+                    lambda e, c=sf_canvas: c.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+            except Exception:
+                pass
 
         def worker():
             if mode == "parallel":
@@ -1094,6 +1140,21 @@ class TabActivation:
             font=("Segoe UI", 14, "bold"),
             text_color="#EF4444"
         ).pack(padx=14, pady=10)
+        # ── FIX: bind mousewheel on cancel card too ──
+        try:
+            sf_canvas = self._console._parent_canvas
+            def _bind_cancel(w):
+                try:
+                    w.bind("<MouseWheel>",
+                           lambda e, c=sf_canvas: c.yview_scroll(
+                               int(-1*(e.delta/120)), "units"), add="+")
+                except Exception:
+                    pass
+                for ch in w.winfo_children():
+                    _bind_cancel(ch)
+            _bind_cancel(cancel_card)
+        except Exception:
+            pass
 
     # ══════════════════════════════════════════════════
     #  PUBLIC API
@@ -1144,6 +1205,13 @@ class TabActivation:
             kw.get("step", 0), msg, level,
             done=kw.get("done", False),
             error=kw.get("error", False))
+        # ── FIX: re-bind mousewheel after each card update (new children may appear) ──
+        try:
+            sf_canvas = self._console._parent_canvas
+            card.bind_scroll(
+                lambda e, c=sf_canvas: c.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        except Exception:
+            pass
 
     def clear_log(self):
         self._cards.clear()
@@ -1296,13 +1364,6 @@ class TabActivation:
                                             text_color=("#8B75B0", "#6B5A8A"))
         self._hist_stats_lbl.pack(side="left", padx=14)
 
-        # ── Table: header lives inside _scrollable_frame so it auto-aligns ──
-        # Use a plain frame grid above the scroll; row data goes inside scroll.
-        # The ONLY reliable way: put header INSIDE the scrollable frame as a
-        # sticky non-scrolling row — done by placing it in the inner frame
-        # with pack BEFORE any data rows, and using pack_propagate tricks.
-        # Simplest correct approach: outer wrapper, header matches content width.
-
         import tkinter as _tk
 
         tbl_wrap = ctk.CTkFrame(parent, fg_color="transparent")
@@ -1430,7 +1491,6 @@ class TabActivation:
                              text_color=("#8B75B0", "#6B5A8A"),
                              width=24).pack(side="left", padx=2, pady=6)
             is_cur = (p == cur)
-            # Fix: never pass "transparent" to border_color — use fg_color instead
             ctk.CTkButton(
                 bar, text=str(p), width=34, height=28,
                 font=("Segoe UI", 14, "bold" if is_cur else "normal"),
