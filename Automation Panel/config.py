@@ -540,9 +540,9 @@ QSpinBox:focus {{
 # ══════════════════════════════════════════════════════
 STRINGS = {
     "en": {
-        "tab_planning":    "📋  Number Planning",
-        "tab_activation":  "⚡  Activation",
-        "tab_msisdn":      "🔍  MSISDN Lookup",
+        "tab_planning":    "📋 Number Planning",
+        "tab_activation":  "⚡ Activation",
+        "tab_msisdn":      "🔍 MSISDN Lookup",
         "config":          "CONFIGURATION",
         "login_express":   "DEALER EXPRESS LOGIN",
         "login_online":    "DEALER ONLINE LOGIN",
@@ -594,9 +594,9 @@ STRINGS = {
         "hist_filter_all":  "All",
     },
     "az": {
-        "tab_planning":    "📋  Nömrə Planlanması",
-        "tab_activation":  "⚡  Aktivasiya",
-        "tab_msisdn":      "🔍  MSISDN Axtarış",
+        "tab_planning":    "📋 Nömrə Planlanması",
+        "tab_activation":  "⚡ Aktivasiya",
+        "tab_msisdn":      "🔍 MSISDN Axtarış",
         "config":          "KONFİQURASİYA",
         "login_express":   "DEALER EXPRESS GİRİŞ",
         "login_online":    "DEALER ONLINE GİRİŞ",
@@ -648,9 +648,9 @@ STRINGS = {
         "hist_filter_all":  "Hamısı",
     },
     "ru": {
-        "tab_planning":    "📋  Планирование",
-        "tab_activation":  "⚡  Активация",
-        "tab_msisdn":      "🔍  Поиск MSISDN",
+        "tab_planning":    "📋 Планирование",
+        "tab_activation":  "⚡ Активация",
+        "tab_msisdn":      "🔍 Поиск MSISDN",
         "config":          "КОНФИГУРАЦИЯ",
         "login_express":   "ВХОД DEALER EXPRESS",
         "login_online":    "ВХОД DEALER ONLINE",

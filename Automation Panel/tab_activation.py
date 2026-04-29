@@ -541,7 +541,9 @@ class _DataDialog(QDialog):
         return e
 
     def _mk_combo(self, values: list, current: str = "") -> QComboBox:
-        cb = QComboBox()
+        class _NoScroll(QComboBox):
+            def wheelEvent(self, e): e.ignore()
+        cb = _NoScroll()
         cb.addItems(values)
         if current in values:
             cb.setCurrentText(current)
@@ -557,6 +559,15 @@ class _DataDialog(QDialog):
             QComboBox QAbstractItemView {{
                 background:{C['card2']}; color:{C['text']};
                 selection-background-color:{C['purple']};
+                selection-color:white;
+                outline:0;
+            }}
+            QComboBox QAbstractItemView::item {{
+                padding:6px 10px;
+                min-height:28px;
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background:{C['purple']}; color:white;
             }}
         """)
         return cb
@@ -580,9 +591,11 @@ class _DataDialog(QDialog):
         self._form.addLayout(self._field_row("DOC_PIN", self._e_pin))
 
         # SIMCARD — prefix + suffix
-        sim_container = QWidget()
-        sim_row = QHBoxLayout(sim_container)
-        sim_row.setSpacing(6)
+        sim_lbl = QLabel("SIMCARD")
+        sim_lbl.setFont(FONT_LABEL)
+        sim_lbl.setFixedWidth(130)
+        sim_lbl.setStyleSheet(f"color:{C['muted']};")
+
         prefix = QLineEdit("8999401")
         prefix.setFixedWidth(80)
         prefix.setReadOnly(True)
@@ -590,22 +603,18 @@ class _DataDialog(QDialog):
         prefix.setMinimumHeight(36)
         prefix.setStyleSheet(f"background:{C['border']}; color:{C['muted']}; "
                              f"border:1px solid {C['border']}; border-radius:8px; padding:4px 8px;")
-        sim_row.addWidget(prefix)
+
         self._e_sim = self._mk_entry(digits_only=True, max_len=13)
-        # Strip prefix if present
         sim_val = d.get("SIMCARD", "")
         if sim_val.startswith("8999401"):
             sim_val = sim_val[7:]
         self._e_sim.setText(sim_val)
-        sim_row.addWidget(self._e_sim, 1)
-        sim_lbl = QLabel("SIMCARD")
-        sim_lbl.setFont(FONT_LABEL)
-        sim_lbl.setFixedWidth(130)
-        sim_lbl.setStyleSheet(f"color:{C['muted']};")
+
         sim_outer = QHBoxLayout()
         sim_outer.setSpacing(10)
         sim_outer.addWidget(sim_lbl)
-        sim_outer.addLayout(sim_row, 1)
+        sim_outer.addWidget(prefix)
+        sim_outer.addWidget(self._e_sim, 1)
         self._form.addLayout(sim_outer)
 
         # PLAN_TYPE
@@ -1120,22 +1129,27 @@ class TabActivation(QWidget):
         self._c_nat     = mk_field(left, "Nationality", "AZERBAIJAN",        disabled=True)
         self._c_ph1p    = mk_field(left, "Phone Prefix", "10")
         self._c_ph1p.setMaxLength(2)
-        def _val_ph1p():
-            ok = len(self._c_ph1p.text().strip()) == 2
-            self._c_ph1p.setStyleSheet('' if ok else
-                f'border:1.5px solid {C["error"]};')
-            self._c_ph1p.setToolTip('' if ok else 'Must be exactly 2 digits')
-        self._c_ph1p.editingFinished.connect(_val_ph1p)
         self._c_ph1n    = mk_field(left, "Phone Number", "2210462")
         self._c_ph1n.setMaxLength(7)
-        def _val_ph1n():
-            ok = len(self._c_ph1n.text().strip()) == 7
-            self._c_ph1n.setStyleSheet('' if ok else
-                f'border:1.5px solid {C["error"]};')
-            self._c_ph1n.setToolTip('' if ok else 'Must be exactly 7 digits')
-        self._c_ph1n.editingFinished.connect(_val_ph1n)
+
+        def _update_validation():
+            ph1p_ok = len(self._c_ph1p.text().strip()) >= 2
+            ph1n_ok = len(self._c_ph1n.text().strip()) >= 7
+            self._c_ph1p.setStyleSheet(
+                f'border:1.5px solid {C["error"]};' if not ph1p_ok else '')
+            self._c_ph1n.setStyleSheet(
+                f'border:1.5px solid {C["error"]};' if not ph1n_ok else '')
+            self._c_ph1p.setToolTip('' if ph1p_ok else 'Min 2 rəqəm tələb olunur')
+            self._c_ph1n.setToolTip('' if ph1n_ok else 'Min 7 rəqəm tələb olunur')
+            if hasattr(self, '_run_btn'):
+                self._run_btn.setEnabled(ph1p_ok and ph1n_ok)
+
+        self._c_ph1p.textChanged.connect(lambda _: _update_validation())
+        self._c_ph1n.textChanged.connect(lambda _: _update_validation())
         self._c_email   = mk_field(left, "Email",        "sgaziyev@azercell.com")
         self._c_email.setFont(font("Segoe UI", 12))
+        self._c_email.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self._c_email.home(False)  # scroll to start
 
         left.addWidget(Divider())
         left.addWidget(SectionHeader(T("exec_mode")))
@@ -1190,6 +1204,7 @@ class TabActivation(QWidget):
         self._run_btn = mk_button(T("start"), "primary", height=46)
         self._run_btn.clicked.connect(self._on_run)
         left.addWidget(self._run_btn)
+        QTimer.singleShot(0, lambda: _update_validation())
 
         self._cancel_btn = mk_button(T("cancel"), "danger", height=40)
         self._cancel_btn.setEnabled(False)
@@ -1367,6 +1382,7 @@ class TabActivation(QWidget):
             val = s.get(key, "")
             if val:
                 widget.setText(val)
+                widget.home(False)
         if s.get("mode") == "serial":
             self._rb_serial.setChecked(True)
         if s.get("test_data"):

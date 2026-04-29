@@ -141,12 +141,42 @@ def mk_entry(placeholder: str = "", width: int = 220,
     return e
 
 
+class _NoScrollCombo(QComboBox):
+    """QComboBox that ignores mouse wheel — prevents accidental value change."""
+    def wheelEvent(self, event):
+        event.ignore()
+
+
+_COMBO_STYLE = """
+    QComboBox {
+        background:%(input)s; color:%(text)s;
+        border:1px solid %(border)s; border-radius:8px;
+        padding:4px 10px;
+    }
+    QComboBox::drop-down { border:none; width:28px; }
+    QComboBox QAbstractItemView {
+        background:%(card2)s; color:%(text)s;
+        selection-background-color:%(purple)s;
+        selection-color:white;
+        outline:0;
+    }
+    QComboBox QAbstractItemView::item {
+        padding:6px 10px;
+        min-height:28px;
+    }
+    QComboBox QAbstractItemView::item:hover {
+        background:%(purple)s; color:white;
+    }
+"""
+
+
 def mk_combo(values: list, default: str = "") -> QComboBox:
-    cb = QComboBox()
+    cb = _NoScrollCombo()
     cb.addItems(values)
     if default in values:
         cb.setCurrentText(default)
     cb.setMinimumHeight(38)
+    cb.setStyleSheet(_COMBO_STYLE % C)
     return cb
 
 

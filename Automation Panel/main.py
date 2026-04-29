@@ -16,8 +16,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
     QTabWidget, QComboBox, QSizePolicy, QStackedWidget,
 )
-from PyQt6.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal, QSettings
-from PyQt6.QtGui import QIcon, QPixmap, QFont, QColor, QPalette
+from PyQt6.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal, QSettings, QPointF
+from PyQt6.QtGui import QIcon, QPixmap, QFont, QColor, QPalette, QPainter, QLinearGradient, QPaintEvent
 
 import config as cfg
 from config import C, T, STRINGS, set_theme, build_qss
@@ -56,59 +56,32 @@ class TopBar(QFrame):
         super().__init__(parent)
         self.setObjectName("topbar")
         self.setFixedHeight(64)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self.setMouseTracking(True)
+
+        # Mouse position for gradient spotlight (0.5 = center default)
+        self._mouse_x_ratio = 0.5
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(16, 0, 16, 0)
+        root.setContentsMargins(24, 0, 20, 0)
         root.setSpacing(0)
 
-        # ── Left: logo + title ──────────────────────
-        left = QHBoxLayout()
-        left.setSpacing(12)
-
-        self._logo_lbl = QLabel()
-        logo_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "Logo", "azercell_logo.png")
-        if os.path.exists(logo_path):
-            pix = QPixmap(logo_path).scaled(
-                120, 48,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation)
-            self._logo_lbl.setPixmap(pix)
-        else:
-            # Fallback badge
-            self._logo_lbl.setText("A")
-            self._logo_lbl.setFixedSize(36, 36)
-            self._logo_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._logo_lbl.setStyleSheet(
-                f"background:{C['purple']}; color:white; "
-                "font-size:18px; font-weight:700; border-radius:8px;")
-        left.addWidget(self._logo_lbl)
-
-        title = QLabel("Automation Panel")
-        title.setFont(font("Segoe UI", 18, bold=True))
-        title.setStyleSheet(f"color:{C['text']}; background:transparent;")
-        left.addWidget(title)
-
-        root.addLayout(left)
-        root.addStretch()
-
-        # ── Center: version badge ────────────────────
-        ver = QLabel("v6.0")
-        ver.setFont(font("Segoe UI", 11))
-        ver.setStyleSheet(
-            f"color:{C['muted']}; background:transparent; margin-right:8px;")
-        root.addWidget(ver)
+        root.addStretch(1)
 
         # ── Right: controls ──────────────────────────
         right = QHBoxLayout()
         right.setSpacing(8)
 
         # History button
-        self._hist_btn = QPushButton("📋  History")
+        self._hist_btn = QPushButton("▤  History")
         self._hist_btn.setFont(font("Segoe UI", 11))
         self._hist_btn.setFixedHeight(32)
-        self._hist_btn.setObjectName("btn_secondary")
+        self._hist_btn.setStyleSheet(
+            "QPushButton { background:rgba(255,255,255,0.10); color:white; "
+            "border:1px solid rgba(255,255,255,0.18); border-radius:8px; padding:0 14px; }"
+            "QPushButton:hover { background:rgba(255,255,255,0.20); }"
+            "QPushButton:disabled { color:rgba(255,255,255,0.30); "
+            "border-color:rgba(255,255,255,0.08); background:rgba(255,255,255,0.04); }")
         self._hist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hist_btn.setEnabled(False)
         self._hist_btn.clicked.connect(self.history_opened)
@@ -121,6 +94,12 @@ class TopBar(QFrame):
         self._lang_combo.setFixedHeight(32)
         self._lang_combo.setFixedWidth(72)
         self._lang_combo.setFont(font("Segoe UI", 11))
+        self._lang_combo.setStyleSheet(
+            "QComboBox { background:rgba(255,255,255,0.10); color:white; "
+            "border:1px solid rgba(255,255,255,0.18); border-radius:8px; padding:0 8px; }"
+            "QComboBox::drop-down { border:none; width:20px; }"
+            "QComboBox QAbstractItemView { background:#1A1130; color:white; "
+            "selection-background-color:#5C2483; border:none; }")
         self._lang_combo.currentTextChanged.connect(
             lambda t: self.lang_changed.emit(t.lower()))
         right.addWidget(self._lang_combo)
@@ -129,12 +108,62 @@ class TopBar(QFrame):
         self._theme_btn = QPushButton(T("light_mode") if cfg.is_dark() else T("dark_mode"))
         self._theme_btn.setFont(font("Segoe UI", 11))
         self._theme_btn.setFixedHeight(32)
-        self._theme_btn.setObjectName("btn_secondary")
+        self._theme_btn.setStyleSheet(
+            "QPushButton { background:rgba(255,255,255,0.10); color:white; "
+            "border:1px solid rgba(255,255,255,0.18); border-radius:8px; padding:0 14px; }"
+            "QPushButton:hover { background:rgba(255,255,255,0.20); }")
         self._theme_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._theme_btn.clicked.connect(self.theme_toggled)
         right.addWidget(self._theme_btn)
 
+        right.addSpacing(8)
+        # (Window min/max/close are handled by native Windows frame)
+
         root.addLayout(right)
+
+    def mouseMoveEvent(self, event):
+        self._mouse_x_ratio = event.position().x() / max(self.width(), 1)
+        self.update()
+        super().mouseMoveEvent(event)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # Base dark gradient (left → right)
+        base = QLinearGradient(0, 0, w, 0)
+        base.setColorAt(0.0, QColor("#0E0818"))
+        base.setColorAt(0.5, QColor("#150F25"))
+        base.setColorAt(1.0, QColor("#0E0818"))
+        painter.fillRect(0, 0, w, h, base)
+
+        # Mouse-following purple spotlight
+        spot_x = self._mouse_x_ratio * w
+        spot = QLinearGradient(spot_x - w * 0.35, 0, spot_x + w * 0.35, 0)
+        spot.setColorAt(0.0, QColor(0, 0, 0, 0))
+        spot.setColorAt(0.5, QColor(92, 36, 131, 90))   # purple glow
+        spot.setColorAt(1.0, QColor(0, 0, 0, 0))
+        painter.fillRect(0, 0, w, h, spot)
+
+        # ── Centered title text ──────────────────────
+        painter.setFont(font("Segoe UI", 16, bold=True))
+        painter.setPen(QColor("white"))
+        painter.drawText(0, 0, w, h, Qt.AlignmentFlag.AlignCenter, "Automation Panel")
+
+        # Bottom accent line drawn directly
+        accent = QLinearGradient(0, 0, w, 0)
+        accent.setColorAt(0.0,              QColor(92, 36, 131, 0))
+        accent.setColorAt(max(0.0, self._mouse_x_ratio - 0.3), QColor(92, 36, 131, 0))
+        accent.setColorAt(self._mouse_x_ratio,                  QColor(167, 100, 220, 255))
+        accent.setColorAt(min(1.0, self._mouse_x_ratio + 0.3),  QColor(92, 36, 131, 0))
+        accent.setColorAt(1.0,              QColor(92, 36, 131, 0))
+        painter.fillRect(0, h - 2, w, 2, accent)
+
+        painter.end()
+
+    # ── Window drag via topbar ──────────────────
+    # (Native frame handles drag & maximize — no custom drag needed)
 
     def enable_history(self, enabled: bool):
         self._hist_btn.setEnabled(enabled)
@@ -289,15 +318,10 @@ class CenteredTabBar(QWidget):
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Azercell Automation Panel")
+        self.setWindowTitle("")
         self.setMinimumSize(1100, 720)
-
-        # App icon
-        ico_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "Logo", "azercell.ico")
-        if os.path.exists(ico_path):
-            self.setWindowIcon(QIcon(ico_path))
+        # Native frame — maximize/minimize/close handled by Windows
+        self._drag_pos = None
 
         # Shared queues & stop event (same as original)
         self._log_q   = queue.Queue()
@@ -337,14 +361,6 @@ class App(QMainWindow):
         self._topbar.lang_changed.connect(self._on_lang_change)
         self._topbar.history_opened.connect(self._open_history)
         root.addWidget(self._topbar)
-
-        # ── Thin accent line below topbar ───────────
-        accent_line = QFrame()
-        accent_line.setFixedHeight(2)
-        accent_line.setStyleSheet(
-            f"background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            f"stop:0 {C['purple']}, stop:0.5 {C['accent2']}, stop:1 transparent);")
-        root.addWidget(accent_line)
 
         # ── Tab area ─────────────────────────────────
         self._tabs = CenteredTabBar()
@@ -494,6 +510,9 @@ class App(QMainWindow):
         else:
             self.show()
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+
     def closeEvent(self, event):
         self._settings.setValue("geometry", self.saveGeometry())
         self._settings.setValue("maximized",
@@ -517,8 +536,8 @@ def main():
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
 
     app = QApplication(sys.argv)
-    app.setApplicationName("AzercellPanel")
-    app.setOrganizationName("Azercell")
+    app.setApplicationName("")
+    app.setOrganizationName("")
 
     # Apply initial dark theme
     set_theme("dark")
@@ -527,19 +546,38 @@ def main():
 
     # Windows 11 dark title bar via ctypes
     window = App()
+    window.setWindowTitle("")
     _apply_dark_titlebar(window)
 
     sys.exit(app.exec())
 
 
 def _apply_dark_titlebar(window: QMainWindow):
-    """Apply dark title bar on Windows 10/11 (build 22000+)."""
+    """
+    Apply dark/purple native title bar on Windows 10/11.
+    - DWMWA_USE_IMMERSIVE_DARK_MODE (20) → dark caption text & buttons
+    - DWMWA_CAPTION_COLOR (35)          → dark background #0E0818
+    - DWMWA_BORDER_COLOR (34)           → purple accent #5C2483
+    """
     try:
         import ctypes
         hwnd = int(window.winId())
-        color = ctypes.c_int(0x1E0A12)
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            hwnd, 35, ctypes.byref(color), ctypes.sizeof(color))
+        # Erase title text at Win32 level
+        ctypes.windll.user32.SetWindowTextW(hwnd, "")
+        dwm = ctypes.windll.dwmapi
+
+        # Dark mode caption (works Win10 1809+)
+        dark = ctypes.c_int(1)
+        dwm.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(dark), ctypes.sizeof(dark))
+
+        # Caption background color — deep dark purple #0E0818 (BGR for DWM)
+        caption_color = ctypes.c_int(0x18080E)   # BGR: 0x18 0x08 0x0E
+        dwm.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption_color), ctypes.sizeof(caption_color))
+
+        # Border/accent color — purple #5C2483 (BGR)
+        border_color = ctypes.c_int(0x83245C)    # BGR: 0x83 0x24 0x5C
+        dwm.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border_color), ctypes.sizeof(border_color))
+
     except Exception:
         pass
 

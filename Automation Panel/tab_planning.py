@@ -317,7 +317,7 @@ class _RowDialog(QDialog):
         self._result = None
         self._is_edit = is_edit
 
-        self.setWindowTitle("✎  Edit Row" if is_edit else "＋  Add Row")
+        self.setWindowTitle("✎  Edit Row" if is_edit else "Add Row")
         self.setModal(True)
         self.setMinimumSize(520, 620)
         self.setMaximumWidth(560)
@@ -333,7 +333,7 @@ class _RowDialog(QDialog):
         hdr_frame.setStyleSheet(f"background:{hdr_color};")
         hdr_lay = QHBoxLayout(hdr_frame)
         hdr_lay.setContentsMargins(16, 0, 16, 0)
-        hdr_lbl = QLabel("✎  Edit Planning Data" if is_edit else "＋  New Planning Data")
+        hdr_lbl = QLabel("✎  Edit Planning Data" if is_edit else "New Planning Data")
         hdr_lbl.setFont(font("Segoe UI", 14, bold=True))
         hdr_lbl.setStyleSheet("color:white; background:transparent;")
         hdr_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -354,8 +354,14 @@ class _RowDialog(QDialog):
 
         d = data or {}
 
+        from PyQt6.QtCore import QRegularExpression
+        from PyQt6.QtGui import QRegularExpressionValidator
+
         # ── MSISDN ──
         self._e_msisdn = mk_entry(placeholder="9 digits", width=0)
+        self._e_msisdn.setMaxLength(9)
+        self._e_msisdn.setValidator(QRegularExpressionValidator(
+            QRegularExpression(r"\d{0,9}"), self._e_msisdn))
         self._e_msisdn.setText(d.get("MSISDN", ""))
         form_lay.addLayout(mk_field_row("MSISDN", self._e_msisdn))
 
@@ -375,6 +381,9 @@ class _RowDialog(QDialog):
         pfx_lbl.setFont(FONT_MONO_S)
 
         self._e_simcard = mk_entry(placeholder="13 digits suffix", width=0)
+        self._e_simcard.setMaxLength(13)
+        self._e_simcard.setValidator(QRegularExpressionValidator(
+            QRegularExpression(r"\d{0,13}"), self._e_simcard))
         existing_sc = d.get("SIMCARD", "")
         self._e_simcard.setText(
             existing_sc[7:] if existing_sc.startswith("8999401") else existing_sc)
@@ -418,21 +427,39 @@ class _RowDialog(QDialog):
         form_lay.addStretch()
 
         # ── Save button ──
-        save_btn = QPushButton("✎  Save Changes" if is_edit else T("save"))
-        save_btn.setFont(font("Segoe UI", 13, bold=True))
-        save_btn.setMinimumHeight(44)
-        save_btn.setStyleSheet(
-            f"background:{'#B45309' if is_edit else C['purple']}; "
-            f"color:white; border-radius:10px;")
-        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        save_btn.clicked.connect(self._save)
+        self._save_btn = QPushButton("✎  Save Changes" if is_edit else T("save"))
+        self._save_btn.setFont(font("Segoe UI", 13, bold=True))
+        self._save_btn.setMinimumHeight(44)
+        self._hdr_color = '#B45309' if is_edit else C['purple']
+        self._save_btn.setStyleSheet(
+            f"background:{self._hdr_color}; color:white; border-radius:10px;")
+        self._save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._save_btn.clicked.connect(self._save)
 
         btn_wrap = QWidget()
         btn_wrap.setStyleSheet(f"background:{C['bg']};")
         btn_wrap_lay = QVBoxLayout(btn_wrap)
         btn_wrap_lay.setContentsMargins(20, 8, 20, 16)
-        btn_wrap_lay.addWidget(save_btn)
+        btn_wrap_lay.addWidget(self._save_btn)
         root.addWidget(btn_wrap)
+
+        # ── Real-time validation ──
+        self._e_msisdn.textChanged.connect(self._validate)
+        self._e_simcard.textChanged.connect(self._validate)
+        self._validate()
+
+    def _validate(self):
+        msisdn_ok = len(self._e_msisdn.text().strip()) == 9
+        sim_ok    = len(self._e_simcard.text().strip()) == 13
+        err_style = f'border:1.5px solid {C["error"]}; border-radius:8px;'
+        self._e_msisdn.setStyleSheet('' if msisdn_ok else err_style)
+        self._e_simcard.setStyleSheet('' if sim_ok else err_style)
+        ok_color   = self._hdr_color
+        dim_color  = C['border2']
+        self._save_btn.setEnabled(msisdn_ok and sim_ok)
+        self._save_btn.setStyleSheet(
+            f"background:{ok_color if (msisdn_ok and sim_ok) else dim_color}; "
+            f"color:white; border-radius:10px;")
 
     def _save(self):
         msisdn = self._e_msisdn.text().strip()
@@ -591,7 +618,7 @@ class TabPlanning(QWidget):
         th_lay.setSpacing(8)
 
         th_lay.addWidget(
-            mk_label("📋  PLANNING DATA", color=C["muted"], bold=True, size=11))
+            mk_label("PLANNING DATA", color=C["muted"], bold=True, size=11))
 
         self._td_count = mk_label(f"0 {T('rows')}", color=C["accent"])
         self._td_count.setFont(FONT_MONO_S)
