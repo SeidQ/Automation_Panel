@@ -46,6 +46,16 @@
         "PLAN_TYPE": "PostPaid",
         "PLAN_TYPE_REG": "PostPaid",
         "TARIFF_TYPE": "flat"
+      },
+      {
+        "MSISDN": "102989141",
+        "SIMCARD": "2411010161241",
+        "DOC_NUMBER": "AA3386081",
+        "DOC_PIN": "7K51ES1",
+        "TARIFF": "371",
+        "PLAN_TYPE": "Postpaid",
+        "PLAN_TYPE_REG": "Postpaid",
+        "TARIFF_TYPE": "flat"
       }
     ],
     "history": []

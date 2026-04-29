@@ -17,9 +17,10 @@ from PyQt6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QGridLayout, QSizePolicy,
     QAbstractScrollArea, QComboBox, QDialogButtonBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+    QSplitter,
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread, QSettings
-from PyQt6.QtGui import QFont, QIntValidator, QColor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread, QSettings, QRegularExpression
+from PyQt6.QtGui import QFont, QIntValidator, QColor, QRegularExpressionValidator
 
 from config import (
     C, DEFAULT_TEST_DATA, TARIFF_TYPE_MAP, TARIFF_TYPE_RMAP, CITY_MAP,
@@ -1027,6 +1028,17 @@ def _page_window(cur, total, max_btns=7):
 # ══════════════════════════════════════════════════════
 #  TAB 2 — PyQt6
 # ══════════════════════════════════════════════════════
+
+
+class _ClearableTable(QTableWidget):
+    """QTableWidget that clears selection when clicking on empty area."""
+    def mousePressEvent(self, event):
+        idx = self.indexAt(event.pos())
+        if not idx.isValid():
+            self.clearSelection()
+            self.setCurrentIndex(self.rootIndex())
+        super().mousePressEvent(event)
+
 class TabActivation(QWidget):
     BASE_URL = "https://dealer-online.azercell.com"
 
@@ -1058,19 +1070,23 @@ class TabActivation(QWidget):
         left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        left_scroll.setFixedWidth(360)
+        left_scroll.setMinimumWidth(260)
+        left_scroll.setMaximumWidth(340)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        left_scroll.setStyleSheet(
-            f"QScrollArea {{ background:{C['card']}; border:none; }}")
 
         left_w = QWidget()
-        left_w.setStyleSheet(f"background:{C['card']};")
+        left_w.setObjectName("card")
         left = QVBoxLayout(left_w)
-        left.setContentsMargins(12, 12, 12, 12)
-        left.setSpacing(6)
+        left.setContentsMargins(16, 16, 16, 16)
+        left.setSpacing(8)
         left_scroll.setWidget(left_w)
-        root.addWidget(left_scroll)
+
+        # Splitter like planning tab
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(6)
+        root.addWidget(splitter)
+        splitter.addWidget(left_scroll)
 
         # Config header
         ph = PanelHeader(T("config"))
@@ -1102,9 +1118,24 @@ class TabActivation(QWidget):
         self._c_cur     = mk_field(left, "Curator",     "TEST",              disabled=True)
         self._c_country = mk_field(left, "Country",     "AZERBAIJAN",        disabled=True)
         self._c_nat     = mk_field(left, "Nationality", "AZERBAIJAN",        disabled=True)
-        self._c_ph1p    = mk_field(left, "Phone Prefix","10")
-        self._c_ph1n    = mk_field(left, "Phone Number","2210462")
-        self._c_email   = mk_field(left, "Email",       "sgaziyev@azercell.com")
+        self._c_ph1p    = mk_field(left, "Phone Prefix", "10")
+        self._c_ph1p.setMaxLength(2)
+        def _val_ph1p():
+            ok = len(self._c_ph1p.text().strip()) == 2
+            self._c_ph1p.setStyleSheet('' if ok else
+                f'border:1.5px solid {C["error"]};')
+            self._c_ph1p.setToolTip('' if ok else 'Must be exactly 2 digits')
+        self._c_ph1p.editingFinished.connect(_val_ph1p)
+        self._c_ph1n    = mk_field(left, "Phone Number", "2210462")
+        self._c_ph1n.setMaxLength(7)
+        def _val_ph1n():
+            ok = len(self._c_ph1n.text().strip()) == 7
+            self._c_ph1n.setStyleSheet('' if ok else
+                f'border:1.5px solid {C["error"]};')
+            self._c_ph1n.setToolTip('' if ok else 'Must be exactly 7 digits')
+        self._c_ph1n.editingFinished.connect(_val_ph1n)
+        self._c_email   = mk_field(left, "Email",        "sgaziyev@azercell.com")
+        self._c_email.setFont(font("Segoe UI", 12))
 
         left.addWidget(Divider())
         left.addWidget(SectionHeader(T("exec_mode")))
@@ -1112,17 +1143,46 @@ class TabActivation(QWidget):
         mode_frame = QFrame()
         mode_frame.setStyleSheet(
             f"background:{C['input']}; border-radius:10px;")
-        mode_lay = QVBoxLayout(mode_frame)
-        mode_lay.setContentsMargins(14, 6, 14, 6)
-        self._mode_group = QButtonGroup(self)
-        self._rb_parallel = QRadioButton(T("parallel"))
-        self._rb_serial   = QRadioButton(T("serial"))
+        mode_lay = QHBoxLayout(mode_frame)
+        mode_lay.setContentsMargins(6, 6, 6, 6)
+        mode_lay.setSpacing(4)
+
+        self._rb_parallel = QPushButton(T("parallel"))
+        self._rb_serial   = QPushButton(T("serial"))
+        self._rb_parallel.setCheckable(True)
+        self._rb_serial.setCheckable(True)
         self._rb_parallel.setChecked(True)
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+        self._mode_group.addButton(self._rb_parallel)
+        self._mode_group.addButton(self._rb_serial)
+
+        def _mode_style(btn, active):
+            if active:
+                btn.setStyleSheet(
+                    f"QPushButton {{ background:{C['purple']}; color:#fff; "
+                    f"border:none; border-radius:8px; padding:6px 12px; font-weight:600; }}")
+            else:
+                btn.setStyleSheet(
+                    f"QPushButton {{ background:transparent; color:{C['muted']}; "
+                    f"border:none; border-radius:8px; padding:6px 12px; font-weight:600; }}"
+                    f"QPushButton:hover {{ color:{C['text2']}; background:{C['card2']}; }}")
+
+        def _on_mode_toggle():
+            _mode_style(self._rb_parallel, self._rb_parallel.isChecked())
+            _mode_style(self._rb_serial,   self._rb_serial.isChecked())
+            self._autosave()
+
+        _mode_style(self._rb_parallel, True)
+        _mode_style(self._rb_serial,   False)
+
+        self._rb_parallel.toggled.connect(lambda _: _on_mode_toggle())
+        self._rb_serial.toggled.connect(lambda _: _on_mode_toggle())
+
         for rb in (self._rb_parallel, self._rb_serial):
             rb.setFont(FONT_LABEL)
-            rb.setStyleSheet(f"color:{C['text']};")
-            mode_lay.addWidget(rb)
-            self._mode_group.addButton(rb)
+            rb.setCursor(Qt.CursorShape.PointingHandCursor)
+            mode_lay.addWidget(rb, 1)
         left.addWidget(mode_frame)
 
         left.addWidget(Divider())
@@ -1142,9 +1202,12 @@ class TabActivation(QWidget):
         left.addStretch()
 
         # ── RIGHT PANEL ──────────────────────────────
-        right = QVBoxLayout()
+        right_w = QWidget()
+        right = QVBoxLayout(right_w)
+        right.setContentsMargins(12, 0, 0, 0)
         right.setSpacing(8)
-        root.addLayout(right, 1)
+        splitter.addWidget(right_w)
+        splitter.setSizes([300, 700])
 
         # Test data header
         td_hdr = QFrame()
@@ -1165,14 +1228,31 @@ class TabActivation(QWidget):
         tdh_lay.addWidget(self._td_count)
         tdh_lay.addStretch()
 
-        for txt, variant, fn in [
-            (T("add"),    "primary",   self._open_add),
-            ("✎  Edit",  "secondary", self._open_edit),
-            (T("delete"), "danger",   self._delete_sel),
+        for _lbl, _fn, _oid, _ss in [
+            (T("add"),    self._open_add,    "",
+             f"QPushButton{{background:{C['purple']};color:#fff;border:none;"
+             f"border-radius:7px;font-size:12px;font-weight:600;"
+             f"padding:0 14px;height:32px;}}"
+             f"QPushButton:hover{{background:{C['accent2']};}}"
+             f"QPushButton:pressed{{background:{C['border2']};}}"),
+            ("✎  Edit",           self._open_edit,   "",
+             f"QPushButton{{background:{C['input']};color:{C['text2']};"
+             f"border:1px solid {C['border']};border-radius:7px;"
+             f"font-size:12px;font-weight:600;padding:0 14px;height:32px;}}"
+             f"QPushButton:hover{{background:{C['card2']};border-color:{C['border2']};color:{C['text']};}}"
+             f"QPushButton:pressed{{background:{C['border']};}}"),
+            (f"✕  {T('delete')}", self._delete_sel,  "",
+             f"QPushButton{{background:transparent;color:{C['error']};"
+             f"border:1px solid {C['error']};border-radius:7px;"
+             f"font-size:12px;font-weight:600;padding:0 14px;height:32px;}}"
+             f"QPushButton:hover{{background:{C['error']};color:white;}}"
+             f"QPushButton:pressed{{background:#B91C1C;}}"),
         ]:
-            btn = mk_button(txt, variant, height=30, min_width=70)
-            btn.clicked.connect(fn)
-            tdh_lay.addWidget(btn)
+            _b = QPushButton(_lbl)
+            _b.setStyleSheet(_ss)
+            _b.setCursor(Qt.CursorShape.PointingHandCursor)
+            _b.clicked.connect(_fn)
+            tdh_lay.addWidget(_b)
         right.addWidget(td_hdr)
 
         # Data table
@@ -1185,7 +1265,7 @@ class TabActivation(QWidget):
         tbl_lay.setSpacing(0)
 
 
-        self._db_table = QTableWidget()
+        self._db_table = _ClearableTable()
         self._db_table.setColumnCount(9)
         self._db_table.setHorizontalHeaderLabels(
             ["#", "MSISDN", "SIMCARD", "DOC_NO", "PIN",
@@ -1210,9 +1290,10 @@ class TabActivation(QWidget):
             'QTableWidget { background:' + C["card2"] + '; color:' + C["text"] + ';'
             ' border:none; font-family:Consolas; font-size:13px;'
             ' alternate-background-color:' + C["bg2"] + ';'
-            ' selection-background-color:#3D1A6B; }'
+            ' selection-background-color:transparent; }'
             'QTableWidget::item { padding:0 6px; border:none; }'
-            'QTableWidget::item:selected { background:#3D1A6B; color:' + C["accent2"] + '; }'
+            'QTableWidget::item:selected { background:rgba(92,36,131,0.25);'
+            ' color:' + C["text"] + '; border-left:2px solid ' + C["purple"] + '; }'
             'QHeaderView::section { background:' + C["input"] + '; color:' + C["muted"] + ';'
             ' font-family:Segoe UI; font-size:11px; font-weight:700;'
             ' border:none; padding:4px 6px; border-right:1px solid ' + C["border"] + '; }'
@@ -1267,7 +1348,7 @@ class TabActivation(QWidget):
         for w in (self._cred_user, self._cred_pass,
                   self._c_ph1p, self._c_ph1n, self._c_email):
             w.textChanged.connect(self._autosave)
-        self._rb_parallel.toggled.connect(self._autosave)
+        # mode toggle autosave handled in _on_mode_toggle
 
     # ══════════════════════════════════════════════════
     #  PERSISTENCE

@@ -188,15 +188,99 @@ class FooterBar(QFrame):
 
 
 # ══════════════════════════════════════════════════════
-#  CUSTOM TAB BAR  (styled QTabWidget wrapper)
+#  CUSTOM CENTERED TAB BAR
 # ══════════════════════════════════════════════════════
-class MainTabWidget(QTabWidget):
+class CenteredTabBar(QWidget):
+    """Fully custom tab bar centered horizontally + QStackedWidget content."""
+
+    tab_changed = pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setDocumentMode(False)
-        self.tabBar().setFont(font("Segoe UI", 13, bold=True))
-        self.tabBar().setExpanding(False)
-        self.tabBar().setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pages   = []
+        self._current = 0
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Centered pill row
+        bar_wrap = QHBoxLayout()
+        bar_wrap.setContentsMargins(0, 12, 0, 12)
+        bar_wrap.addStretch()
+
+        self._pill = QFrame()
+        self._pill.setStyleSheet(
+            f"QFrame {{"
+            f" background:{C['bg2']};"
+            f" border-radius:14px;"
+            f" border:1px solid {C['border']};"
+            f"}}")
+        self._pill_lay = QHBoxLayout(self._pill)
+        self._pill_lay.setContentsMargins(5, 5, 5, 5)
+        self._pill_lay.setSpacing(3)
+
+        bar_wrap.addWidget(self._pill)
+        bar_wrap.addStretch()
+        outer.addLayout(bar_wrap)
+
+        # Gradient separator
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(
+            "border:none;"
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            f"stop:0 transparent,"
+            f"stop:0.2 {C['border']},"
+            f"stop:0.8 {C['border']},"
+            f"stop:1 transparent);")
+        outer.addWidget(sep)
+
+        # Content
+        self._stack = QStackedWidget()
+        outer.addWidget(self._stack, 1)
+
+    def addTab(self, widget: QWidget, label: str):
+        idx = len(self._pages)
+        btn = QPushButton(label)
+        btn.setFont(font("Segoe UI", 13, bold=True))
+        btn.setCheckable(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setMinimumHeight(36)
+        btn.setMinimumWidth(160)
+        btn.clicked.connect(lambda _, i=idx: self.setCurrentIndex(i))
+        self._pill_lay.addWidget(btn)
+        self._stack.addWidget(widget)
+        self._pages.append(btn)
+        if idx == 0:
+            self._style(0)
+
+    def setCurrentIndex(self, idx: int):
+        self._current = idx
+        self._stack.setCurrentIndex(idx)
+        self._style(idx)
+        self.tab_changed.emit(idx)
+
+    def currentIndex(self) -> int:
+        return self._current
+
+    def clear(self):
+        for btn in self._pages:
+            self._pill_lay.removeWidget(btn)
+            btn.deleteLater()
+        while self._stack.count():
+            self._stack.removeWidget(self._stack.widget(0))
+        self._pages.clear()
+        self._current = 0
+
+    def _style(self, active: int):
+        for i, btn in enumerate(self._pages):
+            if i == active:
+                btn.setStyleSheet(
+                    f"QPushButton {{"                    f" background:{C['purple']}; color:#fff;"                    f" border:none; border-radius:10px;"                    f" padding:7px 28px;"                    f"}}")
+            else:
+                btn.setStyleSheet(
+                    f"QPushButton {{"                    f" background:transparent; color:{C['muted']};"                    f" border:none; border-radius:10px;"                    f" padding:7px 28px;"                    f"}}"                    f"QPushButton:hover {{"                    f" background:{C['card2']};"                    f" color:{C['text2']};"                    f"}}")
 
 
 # ══════════════════════════════════════════════════════
@@ -263,7 +347,7 @@ class App(QMainWindow):
         root.addWidget(accent_line)
 
         # ── Tab area ─────────────────────────────────
-        self._tabs = MainTabWidget()
+        self._tabs = CenteredTabBar()
         self._tabs.setContentsMargins(0, 0, 0, 0)
 
         # Build tab contents
@@ -277,7 +361,7 @@ class App(QMainWindow):
 
         tab_wrapper = QWidget()
         tw_lay = QVBoxLayout(tab_wrapper)
-        tw_lay.setContentsMargins(16, 12, 16, 8)
+        tw_lay.setContentsMargins(0, 0, 0, 0)
         tw_lay.setSpacing(0)
         tw_lay.addWidget(self._tabs)
         root.addWidget(tab_wrapper, 1)

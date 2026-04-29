@@ -209,6 +209,21 @@ QPushButton#btn_secondary:hover {{
     border-color: {c['border2']};
 }}
 
+QPushButton#btn_eye {{
+    background-color: {c['input']};
+    color: {c['text2']};
+    border: 1px solid {c['border']};
+    font-family: 'Segoe UI Emoji', 'Segoe UI Symbol', 'Arial Unicode MS';
+    font-size: 16px;
+}}
+QPushButton#btn_eye:hover {{
+    background-color: {c['card2']};
+}}
+QPushButton#btn_eye:checked {{
+    border-color: {c['purple']};
+    color: {c['purple']};
+}}
+
 QPushButton#btn_danger {{
     background-color: transparent;
     color: {c['error']};
@@ -377,6 +392,16 @@ QCheckBox::indicator:checked {{
     border-color: {c['purple']};
 }}
 
+/* ── RadioButton ── */
+QRadioButton {{
+    color: {c['text2']};
+    spacing: 8px;
+}}
+QRadioButton::indicator {{
+    width: 0px;
+    height: 0px;
+}}
+
 /* ── Frames / Cards ── */
 QFrame#card {{
     background-color: {c['card']};
@@ -524,8 +549,8 @@ STRINGS = {
         "files":           "FILES",
         "constants":       "FIXED VALUES",
         "exec_mode":       "EXECUTION MODE",
-        "parallel":        "Parallel  (fast)",
-        "serial":          "Serial  (reliable)",
+        "parallel":        "Parallel",
+        "serial":          "Serial",
         "start":           "▶  START",
         "cancel":          "✕  CANCEL",
         "clear_log":       "Clear Log",
@@ -578,8 +603,8 @@ STRINGS = {
         "files":           "FAYLLAR",
         "constants":       "SABİT DƏYƏRLƏR",
         "exec_mode":       "İCRA REJİMİ",
-        "parallel":        "Paralel  (sürətli)",
-        "serial":          "Ardıcıl  (etibarlı)",
+        "parallel":        "Paralel",
+        "serial":          "Ardıcıl",
         "start":           "▶  START",
         "cancel":          "✕  LƏĞV ET",
         "clear_log":       "Logu Təmizlə",
@@ -632,8 +657,8 @@ STRINGS = {
         "files":           "ФАЙЛЫ",
         "constants":       "ФИКСИРОВАННЫЕ ЗНАЧЕНИЯ",
         "exec_mode":       "РЕЖИМ ВЫПОЛНЕНИЯ",
-        "parallel":        "Параллельно  (быстро)",
-        "serial":          "Последовательно  (надёжно)",
+        "parallel":        "Параллельно",
+        "serial":          "Последовательно",
         "start":           "▶  СТАРТ",
         "cancel":          "✕  ОТМЕНА",
         "clear_log":       "Очистить лог",

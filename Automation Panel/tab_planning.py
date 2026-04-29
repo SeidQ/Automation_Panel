@@ -29,7 +29,7 @@ from selenium.webdriver.support.wait import WebDriverWait
 from config import C, T, save_state, load_section
 from widgets import (
     mk_label, mk_button, mk_entry, mk_combo, mk_field_row,
-    mk_password_field, Card, SectionHeader, Divider, PanelHeader,
+    mk_password_field, mk_eye_button, Card, SectionHeader, Divider, PanelHeader,
     FONT_MONO, FONT_MONO_S, FONT_LABEL, FONT_UI, FONT_UI_B,
     FONT_SECTION, font,
 )
@@ -460,6 +460,17 @@ class _RowDialog(QDialog):
 # ══════════════════════════════════════════════════════
 #  MAIN TAB WIDGET
 # ══════════════════════════════════════════════════════
+
+
+class _ClearableTable(QTableWidget):
+    """QTableWidget that clears selection when clicking on empty area."""
+    def mousePressEvent(self, event):
+        idx = self.indexAt(event.pos())
+        if not idx.isValid():
+            self.clearSelection()
+            self.setCurrentIndex(self.rootIndex())
+        super().mousePressEvent(event)
+
 class TabPlanning(QWidget):
     """Tab 1 — Number Planning. PyQt6 version."""
 
@@ -494,6 +505,8 @@ class TabPlanning(QWidget):
         left_scroll.setFrameShape(QFrame.Shape.NoFrame)
         left_scroll.setMinimumWidth(260)
         left_scroll.setMaximumWidth(340)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         left_w = QWidget()
         left_w.setObjectName("card")
@@ -508,7 +521,7 @@ class TabPlanning(QWidget):
         # Username
         self._np_user = mk_entry(placeholder="Username", width=0)
         self._np_user.setText("ccequlamova")
-        left_lay.addLayout(mk_field_row("Username", self._np_user))
+        left_lay.addLayout(mk_field_row("Username", self._np_user, label_width=80))
 
         # Password (with show/hide)
         pass_row = QHBoxLayout()
@@ -519,14 +532,7 @@ class TabPlanning(QWidget):
         lbl_p.setStyleSheet(f"color:{C['muted']}; background:transparent;")
         self._np_pass = mk_entry(password=True, width=0)
         self._np_pass.setText("Yltak_141012#")
-        eye_btn = QPushButton("👁")
-        eye_btn.setFixedSize(38, 38)
-        eye_btn.setObjectName("btn_secondary")
-        eye_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        eye_btn.setCheckable(True)
-        eye_btn.toggled.connect(
-            lambda chk: self._np_pass.setEchoMode(
-                QLineEdit.EchoMode.Normal if chk else QLineEdit.EchoMode.Password))
+        eye_btn = mk_eye_button(self._np_pass)
         pass_row.addWidget(lbl_p)
         pass_row.addWidget(self._np_pass, 1)
         pass_row.addWidget(eye_btn)
@@ -592,30 +598,36 @@ class TabPlanning(QWidget):
         th_lay.addWidget(self._td_count)
         th_lay.addStretch()
 
-        del_btn = mk_button(T("delete"), "danger", height=30, min_width=70)
-        del_btn.setFont(font("Segoe UI", 11, bold=True))
-        del_btn.clicked.connect(self._delete_sel)
-        th_lay.addWidget(del_btn)
-
-        edit_btn = QPushButton("✎  Edit")
-        edit_btn.setFont(font("Segoe UI", 11, bold=True))
-        edit_btn.setMinimumHeight(30)
-        edit_btn.setMinimumWidth(80)
-        edit_btn.setStyleSheet(
-            "background:#B45309; color:white; border-radius:8px;")
-        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        edit_btn.clicked.connect(self._open_edit)
-        th_lay.addWidget(edit_btn)
-
-        add_btn = mk_button(T("add"), "primary", height=30, min_width=90)
-        add_btn.setFont(font("Segoe UI", 11, bold=True))
-        add_btn.clicked.connect(self._open_add)
-        th_lay.addWidget(add_btn)
+        for _lbl, _fn, _oid, _ss in [
+            (T("add"),    self._open_add,    "",
+             f"QPushButton{{background:{C['purple']};color:#fff;border:none;"
+             f"border-radius:7px;font-size:12px;font-weight:600;"
+             f"padding:0 14px;height:32px;}}"
+             f"QPushButton:hover{{background:{C['accent2']};}}"
+             f"QPushButton:pressed{{background:{C['border2']};}}"),
+            ("✎  Edit",           self._open_edit,   "",
+             f"QPushButton{{background:{C['input']};color:{C['text2']};"
+             f"border:1px solid {C['border']};border-radius:7px;"
+             f"font-size:12px;font-weight:600;padding:0 14px;height:32px;}}"
+             f"QPushButton:hover{{background:{C['card2']};border-color:{C['border2']};color:{C['text']};}}"
+             f"QPushButton:pressed{{background:{C['border']};}}"),
+            (f"✕  {T('delete')}", self._delete_sel,  "",
+             f"QPushButton{{background:transparent;color:{C['error']};"
+             f"border:1px solid {C['error']};border-radius:7px;"
+             f"font-size:12px;font-weight:600;padding:0 14px;height:32px;}}"
+             f"QPushButton:hover{{background:{C['error']};color:white;}}"
+             f"QPushButton:pressed{{background:#B91C1C;}}"),
+        ]:
+            _b = QPushButton(_lbl)
+            _b.setStyleSheet(_ss)
+            _b.setCursor(Qt.CursorShape.PointingHandCursor)
+            _b.clicked.connect(_fn)
+            th_lay.addWidget(_b)
 
         right_lay.addWidget(th)
 
         # Data table — QTableWidget
-        self._data_table = QTableWidget()
+        self._data_table = _ClearableTable()
         self._data_table.setColumnCount(9)
         self._data_table.setHorizontalHeaderLabels(
             ["#", "MSISDN", "SIMCARD", "PLAN",
@@ -640,9 +652,10 @@ class TabPlanning(QWidget):
             'QTableWidget { background:' + C["card2"] + '; color:' + C["text"] + ';'
             ' border:none; font-family:Consolas; font-size:12px;'
             ' alternate-background-color:' + C["bg2"] + ';'
-            ' selection-background-color:#3D1A6B; }'
+            ' selection-background-color:transparent; }'
             'QTableWidget::item { padding:0 6px; border:none; }'
-            'QTableWidget::item:selected { background:#3D1A6B; color:' + C["accent2"] + '; }'
+            'QTableWidget::item:selected { background:rgba(92,36,131,0.25);'
+            ' color:' + C["text"] + '; border-left:2px solid ' + C["purple"] + '; }'
             'QHeaderView::section { background:' + C["input"] + '; color:' + C["muted"] + ';'
             ' font-family:Segoe UI; font-size:11px; font-weight:700;'
             ' border:none; padding:4px 6px;'

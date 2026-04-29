@@ -227,25 +227,71 @@ def mk_file_field(parent_layout, label: str, default: str = "",
     return e
 
 
+_EYE_OPEN = (
+    "M12 5C7 5 2.73 8.11 1 12c1.73 3.89 6 7 11 7s9.27-3.11 11-7"
+    "c-1.73-3.89-6-7-11-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"
+    "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"
+)
+_EYE_CLOSED = (
+    "M17.94 11A10 10 0 0 0 12 5C7 5 2.73 8.11 1 12a10.16 10.16 0 0 0 5 5.92"
+    "M6.53 6.53A9.94 9.94 0 0 0 1 12a10 10 0 0 0 14.54 5.46"
+    "M22.99 12A10 10 0 0 0 12 5.01M2 2l20 20"
+)
+
+
+def mk_eye_button(entry: "QLineEdit") -> QPushButton:
+    """Modern SVG eye button — no emoji, always renders."""
+    from PyQt6.QtGui import QPainter, QPainterPath, QPen
+    from PyQt6.QtSvg import QSvgRenderer
+    from PyQt6.QtCore import QByteArray
+
+    def _make_icon(path_d: str, color: str) -> "QIcon":
+        svg = (
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"'
+            f' fill="none" stroke="{color}" stroke-width="2"'
+            f' stroke-linecap="round" stroke-linejoin="round">'
+            f'<path d="{path_d}"/></svg>'
+        ).encode()
+        renderer = QSvgRenderer(QByteArray(svg))
+        from PyQt6.QtGui import QPixmap
+        px = QPixmap(20, 20)
+        px.fill(Qt.GlobalColor.transparent)
+        p = QPainter(px)
+        renderer.render(p)
+        p.end()
+        return QIcon(px)
+
+    btn = QPushButton()
+    btn.setFixedSize(38, 38)
+    btn.setObjectName("btn_eye")
+    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setCheckable(True)
+
+    col_off = "#8B75B0"
+    col_on  = "#5C2483"
+
+    icon_off = _make_icon(_EYE_OPEN,   col_off)
+    icon_on  = _make_icon(_EYE_CLOSED, col_on)
+    btn.setIcon(icon_off)
+    btn.setIconSize(QSize(20, 20))
+
+    def _toggle(checked: bool):
+        entry.setEchoMode(
+            QLineEdit.EchoMode.Normal if checked
+            else QLineEdit.EchoMode.Password)
+        btn.setIcon(icon_on if checked else icon_off)
+
+    btn.toggled.connect(_toggle)
+    return btn
+
+
 def mk_password_field(parent_layout, label: str, default: str = "",
                       label_width: int = 140) -> QLineEdit:
     """Labeled password entry with show/hide toggle."""
     e = mk_entry(password=True, width=0)
     e.setText(default)
 
-    eye_btn = QPushButton("👁")
-    eye_btn.setFixedSize(38, 38)
-    eye_btn.setObjectName("btn_secondary")
-    eye_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    eye_btn.setFont(font("Segoe UI", 14))
-    eye_btn.setCheckable(True)
-
-    def toggle(checked):
-        e.setEchoMode(
-            QLineEdit.EchoMode.Normal if checked
-            else QLineEdit.EchoMode.Password)
-
-    eye_btn.toggled.connect(toggle)
+    eye_btn = mk_eye_button(e)
 
     row = QHBoxLayout()
     row.setSpacing(8)
