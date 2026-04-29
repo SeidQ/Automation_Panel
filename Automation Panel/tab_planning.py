@@ -1,6 +1,7 @@
 """
 tab_planning.py — Tab 1: Number Planning (Dealer Express — Selenium)
-v5.2 — Tariff selector added.
+PyQt6 Migration — CustomTkinter → PyQt6
+v6.0 — Full PyQt6 rewrite, business logic (Selenium) UNCHANGED.
 """
 import os
 import csv
@@ -10,20 +11,32 @@ import queue
 from copy import deepcopy
 from datetime import datetime
 
-import customtkinter as ctk
+from PyQt6.QtWidgets import (
+    QWidget, QFrame, QLabel, QPushButton, QLineEdit,
+    QHBoxLayout, QVBoxLayout, QGridLayout, QScrollArea,
+    QTextEdit, QComboBox, QDialog, QSizePolicy, QSplitter,
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
+)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtGui import QFont, QColor, QTextCursor
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 
-from config import C, FONT_UI, FONT_UI_B, FONT_MONO_S, FONT_LABEL, FONT_SECTION
-from config import save_state, load_section
-from widgets import mk_section, mk_field, mk_divider, mk_panel_header, mk_label
+from config import C, T, save_state, load_section
+from widgets import (
+    mk_label, mk_button, mk_entry, mk_combo, mk_field_row,
+    mk_password_field, Card, SectionHeader, Divider, PanelHeader,
+    FONT_MONO, FONT_MONO_S, FONT_LABEL, FONT_UI, FONT_UI_B,
+    FONT_SECTION, font,
+)
 
 
 # ══════════════════════════════════════════════════════
-#  CSV HEADERS
+#  CSV HEADERS  (unchanged)
 # ══════════════════════════════════════════════════════
 _PLAN_HEADERS = [
     "Msisdn (9 digits long)",
@@ -50,49 +63,26 @@ _UPDATE_HEADERS = [
 _PLAN_CODE = {"PostPaid": "1", "Prepaid": "2"}
 
 _SEGMENT_OPTS = {
-    "B2C  (2)":      "2",
-    "B2B  (1)":      "1",
-    "Internal (3)":  "3",
-    "Guest  (4)":    "4",
+    "B2C  (2)":     "2",
+    "B2B  (1)":     "1",
+    "Internal (3)": "3",
+    "Guest  (4)":   "4",
 }
 _SEGMENT_RMAP = {v: k for k, v in _SEGMENT_OPTS.items()}
 
-# Dealer Express — Select activation tariff dropdown
 _UPDATE_TARIFFS = [
-    "normal",
-    "B2B_010_c1",
-    "B2B_010_c2",
-    "B2B_010_c3",
-    "B2B_010_c4",
-    "B2B_010_c5",
-    "B2B_010_c6",
-    "B2B_Gold",
-    "B2B_Stndrd",
-    "askercell",
-    "azercell_test",
-    "b2c_010",
-    "b2c_010_prep",
-    "b2c_010_veteran",
-    "data",
-    "data_109AZN",
-    "data_129AZN",
-    "data_129AZN_WTTX",
-    "data_159AZN_WTTX",
-    "data_99AZN",
-    "data_mifi",
-    "data_new",
-    "data_old",
-    "dovletcell",
-    "esimesim_datafwa_devices",
-    "gencol9",
-    "unimediacell",
-    "naxtel",
-    "test_data_prepaid",
+    "normal", "B2B_010_c1", "B2B_010_c2", "B2B_010_c3", "B2B_010_c4",
+    "B2B_010_c5", "B2B_010_c6", "B2B_Gold", "B2B_Stndrd", "askercell",
+    "azercell_test", "b2c_010", "b2c_010_prep", "b2c_010_veteran",
+    "data", "data_109AZN", "data_129AZN", "data_129AZN_WTTX",
+    "data_159AZN_WTTX", "data_99AZN", "data_mifi", "data_new", "data_old",
+    "dovletcell", "esimesim_datafwa_devices", "gencol9",
+    "unimediacell", "naxtel", "test_data_prepaid",
 ]
 
 
 # ══════════════════════════════════════════════════════
-#  CSV GENERATOR
+#  CSV GENERATOR  (unchanged logic)
 # ══════════════════════════════════════════════════════
 def _write_csv(path, headers, rows):
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
@@ -109,9 +99,7 @@ def build_csvs(data_rows):
     update_path = os.path.join(tmp, f"np_update_{ts}.csv")
     assign_path = os.path.join(tmp, f"np_assign_{ts}.csv")
 
-    plan_rows = []
-    update_rows = []
-    assign_rows = []
+    plan_rows, update_rows, assign_rows = [], [], []
 
     for d in data_rows:
         msisdn   = str(d.get("MSISDN",      "")).strip()
@@ -124,7 +112,7 @@ def build_csvs(data_rows):
         numtype  = str(d.get("NUMBER_TYPE", "EXTERNAL")).strip()
         desc     = str(d.get("DESCRIPTION", "")).strip()
 
-        plan_rows.append([msisdn, usage, plan_c, price, segment, simcard, public_f, numtype])
+        plan_rows.append(  [msisdn, usage, plan_c, price, segment, simcard, public_f, numtype])
         update_rows.append([msisdn, plan_c, price, segment, simcard, desc, public_f, numtype])
         assign_rows.append([msisdn])
 
@@ -140,7 +128,7 @@ def build_csvs(data_rows):
 
 
 # ══════════════════════════════════════════════════════
-#  SELENIUM WORKER
+#  SELENIUM WORKER  (unchanged)
 # ══════════════════════════════════════════════════════
 def _find_chromedriver():
     import shutil
@@ -185,7 +173,6 @@ def run_number_planning(cfg, log_q, stop_ev):
     wait30 = WebDriverWait(driver, 30)
 
     try:
-        # ── Login ──────────────────────────────────────
         log("🔐 Logging in to Dealer Express...")
         driver.get(
             "https://rhsso.azercell.com/auth/realms/external/protocol/openid-connect/auth"
@@ -205,7 +192,7 @@ def run_number_planning(cfg, log_q, stop_ev):
         wait30.until(EC.url_contains("dealerexpress.azercell.com"))
         log("✓ Login successful.", "success")
 
-        # ── Step 1 — Assign to Contractor Dealer ──────
+        # Step 1 — Assign to Contractor Dealer
         if stop_ev.is_set(): return
         log("🏢 Number Sales — Assigning to contractor dealer...")
         wait.until(EC.element_to_be_clickable(
@@ -241,7 +228,7 @@ def run_number_planning(cfg, log_q, stop_ev):
                        "//div[contains(@class,'success')] | //div[contains(@class,'alert')]")))
         _wait_toast_gone(driver, wait)
 
-        # ── Step 2 — Number Planning (public=0) ───────
+        # Step 2 — Number Planning
         if stop_ev.is_set(): return
         log("📋 Navigating to Number Planning...")
         wait.until(EC.element_to_be_clickable(
@@ -264,7 +251,7 @@ def run_number_planning(cfg, log_q, stop_ev):
                        "//div[contains(@class,'success')] | //div[contains(@class,'alert')]")))
         _wait_toast_gone(driver, wait)
 
-        # ── Step 3 — Number Update ─────────────────────
+        # Step 3 — Number Update
         if stop_ev.is_set(): return
         log("🔄 Switching to Number Update tab...")
         wait.until(EC.element_to_be_clickable(
@@ -312,39 +299,172 @@ def run_number_planning(cfg, log_q, stop_ev):
 
 
 # ══════════════════════════════════════════════════════
-#  DIALOG HELPERS
+#  WORKER SIGNAL BRIDGE
+#  (QThread alternative — uses plain thread + QTimer poll
+#   same as main.py _poll mechanism, already wired up)
 # ══════════════════════════════════════════════════════
-def _center_on_parent(dlg, parent, w=520, h=580):
-    parent.update_idletasks()
-    px, py = parent.winfo_rootx(), parent.winfo_rooty()
-    pw, ph = parent.winfo_width(), parent.winfo_height()
-    dlg.geometry(f"{w}x{h}+{px+(pw-w)//2}+{py+(ph-h)//2}")
-
-def _style_dialog(dlg):
-    import os as _os
-    try:
-        _ico = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "Logo", "azercell.ico")
-        if _os.path.exists(_ico):
-            dlg.iconbitmap(_ico)
-    except Exception:
-        pass
-    try:
-        from ctypes import windll, byref, sizeof, c_int
-        dlg.update_idletasks()
-        hwnd = windll.user32.GetParent(dlg.winfo_id())
-        windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, byref(c_int(0x1E0A12)), sizeof(c_int))
-    except Exception:
-        pass
+class _DoneSignal(QObject):
+    done = pyqtSignal()
 
 
 # ══════════════════════════════════════════════════════
-#  TAB 1 UI CLASS
+#  ROW DIALOG  (Add / Edit)
 # ══════════════════════════════════════════════════════
-class TabPlanning:
-    """Builds and owns Tab 1 — Number Planning."""
+class _RowDialog(QDialog):
+    def __init__(self, parent, T, data: dict = None, is_edit: bool = False):
+        super().__init__(parent)
+        self._T      = T
+        self._result = None
+        self._is_edit = is_edit
 
-    def __init__(self, tab, log_q: queue.Queue, T):
-        self._tab     = tab
+        self.setWindowTitle("✎  Edit Row" if is_edit else "＋  Add Row")
+        self.setModal(True)
+        self.setMinimumSize(520, 620)
+        self.setMaximumWidth(560)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Header banner
+        hdr_frame = QFrame()
+        hdr_frame.setFixedHeight(52)
+        hdr_color = "#B45309" if is_edit else C["purple"]
+        hdr_frame.setStyleSheet(f"background:{hdr_color};")
+        hdr_lay = QHBoxLayout(hdr_frame)
+        hdr_lay.setContentsMargins(16, 0, 16, 0)
+        hdr_lbl = QLabel("✎  Edit Planning Data" if is_edit else "＋  New Planning Data")
+        hdr_lbl.setFont(font("Segoe UI", 14, bold=True))
+        hdr_lbl.setStyleSheet("color:white; background:transparent;")
+        hdr_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hdr_lay.addWidget(hdr_lbl)
+        root.addWidget(hdr_frame)
+
+        # Scrollable form area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        form_widget = QWidget()
+        form_widget.setObjectName("card")
+        form_lay = QVBoxLayout(form_widget)
+        form_lay.setContentsMargins(20, 16, 20, 16)
+        form_lay.setSpacing(10)
+        scroll.setWidget(form_widget)
+        root.addWidget(scroll, 1)
+
+        d = data or {}
+
+        # ── MSISDN ──
+        self._e_msisdn = mk_entry(placeholder="9 digits", width=0)
+        self._e_msisdn.setText(d.get("MSISDN", ""))
+        form_lay.addLayout(mk_field_row("MSISDN", self._e_msisdn))
+
+        # ── SIM Card (prefix locked + suffix entry) ──
+        sim_row_lbl = QLabel("SIMCARD")
+        sim_row_lbl.setFont(FONT_LABEL)
+        sim_row_lbl.setFixedWidth(140)
+        sim_row_lbl.setStyleSheet(f"color:{C['muted']}; background:transparent;")
+
+        pfx_lbl = QLineEdit("8999401")
+        pfx_lbl.setReadOnly(True)
+        pfx_lbl.setFixedWidth(78)
+        pfx_lbl.setMinimumHeight(38)
+        pfx_lbl.setStyleSheet(
+            f"color:{C['muted']}; background:{C['bg2']}; "
+            f"border:1.5px solid {C['border']}; border-radius:8px; padding:6px 8px;")
+        pfx_lbl.setFont(FONT_MONO_S)
+
+        self._e_simcard = mk_entry(placeholder="13 digits suffix", width=0)
+        existing_sc = d.get("SIMCARD", "")
+        self._e_simcard.setText(
+            existing_sc[7:] if existing_sc.startswith("8999401") else existing_sc)
+
+        sim_row = QHBoxLayout()
+        sim_row.setSpacing(10)
+        sim_row.addWidget(sim_row_lbl)
+        sim_row.addWidget(pfx_lbl)
+        sim_row.addWidget(self._e_simcard, 1)
+        form_lay.addLayout(sim_row)
+
+        # ── Dropdowns ──
+        self._cb_plan    = mk_combo(["PostPaid", "Prepaid"], d.get("PLAN_TYPE", "PostPaid"))
+        self._cb_usage   = mk_combo(["VOICE", "DATA"],       d.get("USAGE", "VOICE"))
+        seg_disp = _SEGMENT_RMAP.get(d.get("SEGMENT", "2"), "B2C  (2)")
+        self._cb_segment = mk_combo(list(_SEGMENT_OPTS.keys()), seg_disp)
+        pub_def = "0  (not public)" if d.get("PUBLIC", "0") == "0" else "1  (public)"
+        self._cb_public  = mk_combo(["0  (not public)", "1  (public)"], pub_def)
+        self._cb_numtype = mk_combo(
+            ["EXTERNAL", "INTERNAL", "GOLDEN"], d.get("NUMBER_TYPE", "EXTERNAL"))
+        self._cb_tariff  = mk_combo(_UPDATE_TARIFFS, d.get("UPDATE_TARIFF", "normal"))
+
+        form_lay.addLayout(mk_field_row("Plan Type",     self._cb_plan))
+        form_lay.addLayout(mk_field_row("Usage Type",    self._cb_usage))
+        form_lay.addLayout(mk_field_row("Segment",       self._cb_segment))
+
+        # ── Price ──
+        self._e_price = mk_entry(placeholder="qepik", width=0)
+        self._e_price.setText(d.get("PRICE", ""))
+        form_lay.addLayout(mk_field_row("Price (qepik)", self._e_price))
+
+        form_lay.addLayout(mk_field_row("Public",        self._cb_public))
+        form_lay.addLayout(mk_field_row("Number Type",   self._cb_numtype))
+
+        # ── Description ──
+        self._e_desc = mk_entry(placeholder="optional", width=0)
+        self._e_desc.setText(d.get("DESCRIPTION", ""))
+        form_lay.addLayout(mk_field_row("Description",   self._e_desc))
+
+        form_lay.addLayout(mk_field_row("Update Tariff", self._cb_tariff))
+        form_lay.addStretch()
+
+        # ── Save button ──
+        save_btn = QPushButton("✎  Save Changes" if is_edit else T("save"))
+        save_btn.setFont(font("Segoe UI", 13, bold=True))
+        save_btn.setMinimumHeight(44)
+        save_btn.setStyleSheet(
+            f"background:{'#B45309' if is_edit else C['purple']}; "
+            f"color:white; border-radius:10px;")
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.clicked.connect(self._save)
+
+        btn_wrap = QWidget()
+        btn_wrap.setStyleSheet(f"background:{C['bg']};")
+        btn_wrap_lay = QVBoxLayout(btn_wrap)
+        btn_wrap_lay.setContentsMargins(20, 8, 20, 16)
+        btn_wrap_lay.addWidget(save_btn)
+        root.addWidget(btn_wrap)
+
+    def _save(self):
+        msisdn = self._e_msisdn.text().strip()
+        sc_sfx = self._e_simcard.text().strip()
+        if not msisdn or not sc_sfx:
+            return
+        self._result = {
+            "MSISDN":        msisdn,
+            "SIMCARD":       "8999401" + sc_sfx,
+            "PLAN_TYPE":     self._cb_plan.currentText(),
+            "USAGE":         self._cb_usage.currentText(),
+            "SEGMENT":       _SEGMENT_OPTS.get(self._cb_segment.currentText(), "2"),
+            "PRICE":         self._e_price.text().strip(),
+            "PUBLIC":        self._cb_public.currentText().split()[0],
+            "NUMBER_TYPE":   self._cb_numtype.currentText(),
+            "DESCRIPTION":   self._e_desc.text().strip(),
+            "UPDATE_TARIFF": self._cb_tariff.currentText(),
+        }
+        self.accept()
+
+    def get_result(self):
+        return self._result
+
+
+# ══════════════════════════════════════════════════════
+#  MAIN TAB WIDGET
+# ══════════════════════════════════════════════════════
+class TabPlanning(QWidget):
+    """Tab 1 — Number Planning. PyQt6 version."""
+
+    def __init__(self, log_q: queue.Queue, T):
+        super().__init__()
         self._log_q   = log_q
         self._T       = T
         self._running = False
@@ -352,214 +472,281 @@ class TabPlanning:
         self._data    = []
         self._sel_row = None
         self._build()
+        self._load_state()
 
+    # ══════════════════════════════════════════════════
+    #  BUILD UI
+    # ══════════════════════════════════════════════════
     def _build(self):
-        T   = self._T
-        tab = self._tab
-        tab.columnconfigure(0, weight=3)
-        tab.columnconfigure(1, weight=5)
-        tab.rowconfigure(0, weight=1)
+        T = self._T
 
-        # ── LEFT panel ────────────────────────────────
-        left = ctk.CTkScrollableFrame(
-            tab, fg_color=("#1C1030", "#FFFFFF"), corner_radius=14,
-            scrollbar_button_color=("#3D2260", "#C4B0DC"),
-            scrollbar_button_hover_color=("#7C6EB0", "#7C6EB0"))
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 12))
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        mk_panel_header(left, T("config"))
-        mk_section(left, T("login_express"))
-        self._np_user = mk_field(left, "Username", "ccequlamova")
-        self._np_pass = mk_field(left, "Password", "Yltak_141012#", show="*")
-        mk_divider(left)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(6)
+        root.addWidget(splitter)
 
-        # ── CSV info card ─────────────────────────────
-        info = ctk.CTkFrame(left, fg_color=("#251540", "#EDE8F5"), corner_radius=10)
-        info.pack(fill="x", padx=14, pady=(0, 12))
-        ctk.CTkLabel(
-            info,
-            text="📄  CSV files are generated automatically\n"
-                 "    from the data table on the right.\n"
-                 "    No manual file preparation needed.",
-            font=("Segoe UI", 10),
-            text_color=("#8B75B0", "#6B5A8A"),
-            justify="left"
-        ).pack(padx=14, pady=10, anchor="w")
+        # ── LEFT PANEL ────────────────────────────────
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        left_scroll.setMinimumWidth(260)
+        left_scroll.setMaximumWidth(340)
 
-        mk_divider(left)
+        left_w = QWidget()
+        left_w.setObjectName("card")
+        left_lay = QVBoxLayout(left_w)
+        left_lay.setContentsMargins(16, 16, 16, 16)
+        left_lay.setSpacing(8)
+        left_scroll.setWidget(left_w)
 
-        # ── Buttons ───────────────────────────────────
-        bf = ctk.CTkFrame(left, fg_color="transparent")
-        bf.pack(fill="x", padx=14, pady=(6, 16))
+        left_lay.addWidget(PanelHeader(T("config")))
+        left_lay.addWidget(SectionHeader(T("login_express")))
 
-        self._start_btn = ctk.CTkButton(
-            bf, text=T("start"), font=("Segoe UI", 14, "bold"),
-            fg_color=("#5C2483", "#5C2483"), hover_color=("#7C6EB0", "#7C6EB0"),
-            height=46, corner_radius=10, command=self._on_start)
-        self._start_btn.pack(fill="x", pady=(0, 8))
+        # Username
+        self._np_user = mk_entry(placeholder="Username", width=0)
+        self._np_user.setText("ccequlamova")
+        left_lay.addLayout(mk_field_row("Username", self._np_user))
 
-        self._cancel_btn = ctk.CTkButton(
-            bf, text=T("cancel"), font=FONT_UI_B,
-            fg_color=("#EF4444", "#DC2626"), hover_color="#B91C1C",
-            height=40, corner_radius=10, state="disabled",
-            command=self._on_cancel)
-        self._cancel_btn.pack(fill="x", pady=(0, 8))
+        # Password (with show/hide)
+        pass_row = QHBoxLayout()
+        pass_row.setSpacing(8)
+        lbl_p = QLabel("Password")
+        lbl_p.setFont(FONT_LABEL)
+        lbl_p.setFixedWidth(80)
+        lbl_p.setStyleSheet(f"color:{C['muted']}; background:transparent;")
+        self._np_pass = mk_entry(password=True, width=0)
+        self._np_pass.setText("Yltak_141012#")
+        eye_btn = QPushButton("👁")
+        eye_btn.setFixedSize(38, 38)
+        eye_btn.setObjectName("btn_secondary")
+        eye_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        eye_btn.setCheckable(True)
+        eye_btn.toggled.connect(
+            lambda chk: self._np_pass.setEchoMode(
+                QLineEdit.EchoMode.Normal if chk else QLineEdit.EchoMode.Password))
+        pass_row.addWidget(lbl_p)
+        pass_row.addWidget(self._np_pass, 1)
+        pass_row.addWidget(eye_btn)
+        left_lay.addLayout(pass_row)
 
-        ctk.CTkButton(
-            bf, text=T("clear_log"), font=FONT_UI,
-            fg_color=("#251540", "#EDE8F5"), hover_color=("#3D2260", "#C4B0DC"),
-            text_color=("#8B75B0", "#6B5A8A"), height=36, corner_radius=10,
-            command=self._clear_log).pack(fill="x")
+        left_lay.addWidget(Divider())
 
-        # ── RIGHT panel ───────────────────────────────
-        right = ctk.CTkFrame(tab, fg_color="transparent")
-        right.grid(row=0, column=1, sticky="nsew")
-        right.columnconfigure(0, weight=1)
-        right.rowconfigure(1, weight=2)
-        right.rowconfigure(3, weight=3)
+        # CSV info card
+        info_card = QFrame()
+        info_card.setObjectName("card")
+        info_card.setStyleSheet(
+            f"QFrame#card {{ background:{C['card2']}; border-radius:10px; "
+            f"border:1px solid {C['border']}; }}")
+        info_lay = QVBoxLayout(info_card)
+        info_lay.setContentsMargins(14, 10, 14, 10)
+        info_lbl = QLabel(
+            "📄  CSV files are generated automatically\n"
+            "    from the data table on the right.\n"
+            "    No manual file preparation needed.")
+        info_lbl.setFont(font("Segoe UI", 10))
+        info_lbl.setStyleSheet(f"color:{C['muted2']}; background:transparent;")
+        info_lay.addWidget(info_lbl)
+        left_lay.addWidget(info_card)
 
-        # Data table header
-        th = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"),
-                          corner_radius=12, height=52)
-        th.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        th.pack_propagate(False)
+        left_lay.addWidget(Divider())
 
-        mk_label(th, "📋  PLANNING DATA", color=C["muted"],
-                 font=("Segoe UI", 11, "bold")).pack(side="left", padx=18, pady=14)
+        # Buttons
+        self._start_btn = mk_button(T("start"), "primary", height=46)
+        self._start_btn.clicked.connect(self._on_start)
+        left_lay.addWidget(self._start_btn)
 
-        self._td_count = mk_label(
-            th, f"0 {T('rows')}", color=C["accent"], font=FONT_MONO_S)
-        self._td_count.pack(side="right", padx=10)
+        self._cancel_btn = mk_button(T("cancel"), "danger", height=40)
+        self._cancel_btn.setEnabled(False)
+        self._cancel_btn.clicked.connect(self._on_cancel)
+        left_lay.addWidget(self._cancel_btn)
 
-        ctk.CTkButton(
-            th, text=T("delete"), width=70, height=30,
-            font=("Segoe UI", 11, "bold"),
-            fg_color=("#EF4444", "#DC2626"), hover_color="#B91C1C",
-            corner_radius=8, command=self._delete_sel
-        ).pack(side="right", pady=10)
+        clear_btn = mk_button(T("clear_log"), "secondary", height=36)
+        clear_btn.clicked.connect(self._clear_log)
+        left_lay.addWidget(clear_btn)
 
-        ctk.CTkButton(
-            th, text="✎  Edit", width=80, height=30,
-            font=("Segoe UI", 11, "bold"),
-            fg_color="#B45309", hover_color="#92400E",
-            text_color="white", corner_radius=8,
-            command=self._open_edit
-        ).pack(side="right", padx=6, pady=10)
+        left_lay.addStretch()
+        splitter.addWidget(left_scroll)
 
-        ctk.CTkButton(
-            th, text=T("add"), width=90, height=30,
-            font=("Segoe UI", 11, "bold"),
-            fg_color=("#5C2483", "#5C2483"), hover_color=("#7C6EB0", "#7C6EB0"),
-            corner_radius=8, command=self._open_add
-        ).pack(side="right", padx=6, pady=10)
+        # ── RIGHT PANEL ───────────────────────────────
+        right_w = QWidget()
+        right_lay = QVBoxLayout(right_w)
+        right_lay.setContentsMargins(12, 0, 0, 0)
+        right_lay.setSpacing(8)
 
-        # Data table textbox
-        self._data_box = ctk.CTkTextbox(
-            right, font=FONT_MONO_S,
-            fg_color=("#1C1030", "#FFFFFF"),
-            text_color=("#EDE8F5", "#1A0A2E"),
-            border_color=("#3D2260", "#C4B0DC"),
-            border_width=1, corner_radius=12, wrap="none")
-        self._data_box.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
-        self._data_box.bind("<Button-1>", self._on_row_click)
+        # Data table header bar
+        th = QFrame()
+        th.setObjectName("card")
+        th.setFixedHeight(52)
+        th_lay = QHBoxLayout(th)
+        th_lay.setContentsMargins(16, 0, 16, 0)
+        th_lay.setSpacing(8)
+
+        th_lay.addWidget(
+            mk_label("📋  PLANNING DATA", color=C["muted"], bold=True, size=11))
+
+        self._td_count = mk_label(f"0 {T('rows')}", color=C["accent"])
+        self._td_count.setFont(FONT_MONO_S)
+        th_lay.addWidget(self._td_count)
+        th_lay.addStretch()
+
+        del_btn = mk_button(T("delete"), "danger", height=30, min_width=70)
+        del_btn.setFont(font("Segoe UI", 11, bold=True))
+        del_btn.clicked.connect(self._delete_sel)
+        th_lay.addWidget(del_btn)
+
+        edit_btn = QPushButton("✎  Edit")
+        edit_btn.setFont(font("Segoe UI", 11, bold=True))
+        edit_btn.setMinimumHeight(30)
+        edit_btn.setMinimumWidth(80)
+        edit_btn.setStyleSheet(
+            "background:#B45309; color:white; border-radius:8px;")
+        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        edit_btn.clicked.connect(self._open_edit)
+        th_lay.addWidget(edit_btn)
+
+        add_btn = mk_button(T("add"), "primary", height=30, min_width=90)
+        add_btn.setFont(font("Segoe UI", 11, bold=True))
+        add_btn.clicked.connect(self._open_add)
+        th_lay.addWidget(add_btn)
+
+        right_lay.addWidget(th)
+
+        # Data table — QTableWidget
+        self._data_table = QTableWidget()
+        self._data_table.setColumnCount(9)
+        self._data_table.setHorizontalHeaderLabels(
+            ["#", "MSISDN", "SIMCARD", "PLAN",
+             "USAGE", "SEG", "PRICE", "PUB", "TYPE"])
+        self._data_table.setMinimumHeight(180)
+        self._data_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self._data_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection)
+        self._data_table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._data_table.setAlternatingRowColors(True)
+        self._data_table.verticalHeader().setVisible(False)
+        self._data_table.setShowGrid(False)
+        self._data_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        _phh = self._data_table.horizontalHeader()
+        _phh.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        _phh.setStretchLastSection(True)
+        for _pci, _pw in enumerate([28, 110, 155, 80, 58, 42, 62, 36]):
+            self._data_table.setColumnWidth(_pci, _pw)
+        self._data_table.setStyleSheet(
+            'QTableWidget { background:' + C["card2"] + '; color:' + C["text"] + ';'
+            ' border:none; font-family:Consolas; font-size:12px;'
+            ' alternate-background-color:' + C["bg2"] + ';'
+            ' selection-background-color:#3D1A6B; }'
+            'QTableWidget::item { padding:0 6px; border:none; }'
+            'QTableWidget::item:selected { background:#3D1A6B; color:' + C["accent2"] + '; }'
+            'QHeaderView::section { background:' + C["input"] + '; color:' + C["muted"] + ';'
+            ' font-family:Segoe UI; font-size:11px; font-weight:700;'
+            ' border:none; padding:4px 6px;'
+            ' border-right:1px solid ' + C["border"] + '; }'
+        )
+        self._data_table.itemSelectionChanged.connect(self._on_table_selection)
+        right_lay.addWidget(self._data_table, 2)
+
+        # Log header bar
+        sh = QFrame()
+        sh.setObjectName("card")
+        sh.setFixedHeight(48)
+        sh_lay = QHBoxLayout(sh)
+        sh_lay.setContentsMargins(16, 0, 16, 0)
+        sh_lay.addWidget(
+            mk_label(T("np_journal"), color=C["muted"], bold=True, size=11))
+        sh_lay.addStretch()
+
+        self._status_lbl = QLabel(T("ready"))
+        self._status_lbl.setFont(font("Consolas", 11, bold=True))
+        self._status_lbl.setStyleSheet(
+            f"color:{C['success']}; background:#0B2210; "
+            "border-radius:8px; padding:2px 10px;")
+        sh_lay.addWidget(self._status_lbl)
+        right_lay.addWidget(sh)
+
+        # Log box
+        self._log_box = QTextEdit()
+        self._log_box.setReadOnly(True)
+        self._log_box.setFont(FONT_MONO_S)
+        self._log_box.setObjectName("logbox")
+        self._log_box.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        right_lay.addWidget(self._log_box, 3)
+
+        splitter.addWidget(right_w)
+        splitter.setSizes([300, 700])
+
+        # Autosave on field change
+        self._np_user.textChanged.connect(self._autosave)
+        self._np_pass.textChanged.connect(self._autosave)
+
         self._render_data()
 
-        # Log header
-        sh = ctk.CTkFrame(right, fg_color=("#1C1030", "#FFFFFF"),
-                          corner_radius=12, height=52)
-        sh.grid(row=2, column=0, sticky="ew", pady=(0, 8))
-        sh.pack_propagate(False)
-        mk_label(sh, T("np_journal"), color=C["muted"],
-                 font=("Segoe UI", 11, "bold")).pack(side="left", padx=18, pady=14)
-        self._status_lbl = ctk.CTkLabel(
-            sh, text=T("ready"), font=("Consolas", 11, "bold"),
-            text_color=("#22C55E", "#16A34A"), fg_color="#0B2210", corner_radius=8)
-        self._status_lbl.pack(side="right", padx=18, pady=14)
-
-        # Log textbox
-        self._log_box = ctk.CTkTextbox(
-            right, font=FONT_MONO_S, fg_color=("#1C1030", "#FFFFFF"),
-            text_color=("#EDE8F5", "#1A0A2E"), border_color=("#3D2260", "#C4B0DC"),
-            border_width=1, corner_radius=12, wrap="word", state="disabled")
-        self._log_box.grid(row=3, column=0, sticky="nsew")
-        for tag, color in [("info",    C["text"]),    ("success", C["success"]),
-                           ("warning", C["warning"]), ("error",   C["error"]),
-                           ("ts",      C["muted"])]:
-            self._log_box.tag_config(tag, foreground=color)
-
-        self._load_state()
-        for w in [self._np_user, self._np_pass]:
-            w.bind("<FocusOut>",   self._autosave)
-            w.bind("<KeyRelease>", self._autosave)
-
-
-    # ── Persistence ────────────────────────────────────
+    # ══════════════════════════════════════════════════
+    #  PERSISTENCE
+    # ══════════════════════════════════════════════════
     def _load_state(self):
         s = load_section("planning")
         if not s:
             return
-        for widget, key in [
-            (self._np_user, "username"),
-            (self._np_pass, "password"),
-        ]:
-            val = s.get(key, "")
-            if val:
-                widget.delete(0, "end")
-                widget.insert(0, val)
+        if s.get("username"):
+            self._np_user.setText(s["username"])
+        if s.get("password"):
+            self._np_pass.setText(s["password"])
         if s.get("planning_data"):
             self._data = s["planning_data"]
             self._render_data()
 
     def _autosave(self, *_):
         save_state("planning", {
-            "username":      self._np_user.get(),
-            "password":      self._np_pass.get(),
+            "username":      self._np_user.text(),
+            "password":      self._np_pass.text(),
             "planning_data": self._data,
         })
 
-    # ── Data table ─────────────────────────────────────
+    # ══════════════════════════════════════════════════
+    #  DATA TABLE
+    # ══════════════════════════════════════════════════
     def _render_data(self):
-        self._data_box.configure(state="normal")
-        self._data_box.delete("1.0", "end")
-        self._data_box.tag_config("header",   foreground=C["muted"])
-        self._data_box.tag_config("selected", background="#3D1A6B")
+        t = self._data_table
+        t.setRowCount(0)
+        for i, d in enumerate(self._data):
+            t.insertRow(i)
+            vals = [
+                str(i + 1),
+                d.get("MSISDN", ""),
+                d.get("SIMCARD", ""),
+                d.get("PLAN_TYPE", "PostPaid"),
+                d.get("USAGE", "VOICE"),
+                d.get("SEGMENT", "2"),
+                d.get("PRICE", ""),
+                d.get("PUBLIC", "0"),
+                d.get("NUMBER_TYPE", "EXTERNAL"),
+            ]
+            for ci, val in enumerate(vals):
+                item = QTableWidgetItem(val)
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                t.setItem(i, ci, item)
+            t.setRowHeight(i, 32)
+        self._td_count.setText(f"{len(self._data)} {self._T('rows')}")
+        if self._sel_row is not None and self._sel_row < t.rowCount():
+            t.selectRow(self._sel_row)
 
-        hdr = (f"{'#':<3}  {'MSISDN':<12}  {'SIMCARD':<22}  "
-               f"{'PLAN':<9}  {'USAGE':<6}  {'SEG':<5}  "
-               f"{'PRICE':<8}  {'PUB':<4}  {'TYPE'}\n")
-        self._data_box.insert("end", hdr, "header")
-        self._data_box.insert("end", "─" * 96 + "\n", "header")
-
-        for i, d in enumerate(self._data, 1):
-            line = (
-                f"{i:<3}  "
-                f"{d.get('MSISDN',''):<12}  "
-                f"{d.get('SIMCARD',''):<22}  "
-                f"{d.get('PLAN_TYPE',''):<9}  "
-                f"{d.get('USAGE','VOICE'):<6}  "
-                f"{d.get('SEGMENT','2'):<5}  "
-                f"{d.get('PRICE',''):<8}  "
-                f"{d.get('PUBLIC','0'):<4}  "
-                f"{d.get('NUMBER_TYPE','EXTERNAL')}\n"
-            )
-            self._data_box.insert(
-                "end", line,
-                "selected" if self._sel_row == i - 1 else "")
-
-        self._data_box.configure(state="disabled")
-        self._td_count.configure(text=f"{len(self._data)} {self._T('rows')}")
-
-    def _on_row_click(self, event):
-        idx      = int(self._data_box.index(f"@{event.x},{event.y}").split(".")[0])
-        data_idx = idx - 3
-        self._sel_row = data_idx if 0 <= data_idx < len(self._data) else None
-        self._render_data()
+    def _on_table_selection(self):
+        rows = self._data_table.selectionModel().selectedRows()
+        self._sel_row = rows[0].row() if rows else None
 
     def _delete_sel(self):
         if self._sel_row is None:
             return
-        del self._data[self._sel_row]
+        row_idx = self._sel_row
         self._sel_row = None
+        del self._data[row_idx]
         self._render_data()
         self._autosave()
 
@@ -571,173 +758,41 @@ class TabPlanning:
             return
         self._open_row_dialog(edit_idx=self._sel_row)
 
-    # ── Add / Edit dialog ──────────────────────────────
     def _open_row_dialog(self, edit_idx=None):
-        T       = self._T
         is_edit = edit_idx is not None
-        d       = self._data[edit_idx] if is_edit else {}
+        row_idx = edit_idx
+        d = self._data[row_idx] if is_edit else {}
+        dlg = _RowDialog(self, self._T, data=d, is_edit=is_edit)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            result = dlg.get_result()
+            if result:
+                if is_edit:
+                    self._data[row_idx] = result
+                    self._sel_row = None
+                else:
+                    self._data.append(result)
+                self._render_data()
+                self._autosave()
 
-        dlg = ctk.CTkToplevel(self._tab)
-        dlg.title("✎  Edit Row" if is_edit else "＋  Add Row")
-        dlg.configure(fg_color=("#120A1E", "#F3F0F8"))
-        dlg.grab_set()
-        _center_on_parent(dlg, self._tab, w=520, h=600)
-        _style_dialog(dlg)
-
-        hdr_col = "#B45309" if is_edit else "#5C2483"
-        dh = ctk.CTkFrame(dlg, fg_color=hdr_col, corner_radius=0, height=52)
-        dh.pack(fill="x")
-        dh.pack_propagate(False)
-        ctk.CTkLabel(
-            dh,
-            text="✎  Edit Planning Data" if is_edit else "＋  New Planning Data",
-            font=("Segoe UI", 14, "bold"), text_color="white"
-        ).place(relx=0.5, rely=0.5, anchor="center")
-
-        frm = ctk.CTkScrollableFrame(dlg, fg_color=("#1C1030", "#FFFFFF"), corner_radius=12)
-        frm.pack(fill="both", expand=True, padx=16, pady=12)
-
-        def _row(label):
-            r = ctk.CTkFrame(frm, fg_color="transparent")
-            r.pack(fill="x", padx=12, pady=5)
-            ctk.CTkLabel(r, text=label, text_color=("#8B75B0", "#6B5A8A"),
-                         font=FONT_LABEL, width=130, anchor="w").pack(side="left")
-            return r
-
-        def _entry_widget(parent_row, default="", digits_only=False, max_len=None):
-            if digits_only and max_len:
-                vcmd = (dlg.register(
-                    lambda s, m=max_len: (s == "" or s.isdigit()) and len(s) <= m), "%P")
-                e = ctk.CTkEntry(
-                    parent_row,
-                    fg_color=("#251540", "#EDE8F5"), border_color=("#3D2260", "#C4B0DC"),
-                    text_color=("#EDE8F5", "#1A0A2E"), font=FONT_MONO_S, height=36,
-                    validate="key", validatecommand=vcmd)
-            else:
-                e = ctk.CTkEntry(
-                    parent_row,
-                    fg_color=("#251540", "#EDE8F5"), border_color=("#3D2260", "#C4B0DC"),
-                    text_color=("#EDE8F5", "#1A0A2E"), font=FONT_MONO_S, height=36)
-            e.pack(side="left", fill="x", expand=True)
-            if default:
-                e.insert(0, str(default))
-            return e
-
-        def _option_widget(parent_row, values, default=""):
-            var = ctk.StringVar(value=default if default in values else values[0])
-            ctk.CTkOptionMenu(
-                parent_row, values=values, variable=var,
-                font=FONT_MONO_S,
-                fg_color=("#251540", "#EDE8F5"),
-                button_color=("#5C2483", "#5C2483"),
-                button_hover_color=("#7C6EB0", "#7C6EB0"),
-                dropdown_fg_color=("#1C1030", "#FFFFFF"),
-                text_color=("#EDE8F5", "#1A0A2E"),
-                dropdown_text_color="#EDE8F5",
-                dropdown_hover_color="#3D2260",
-            ).pack(side="left", fill="x", expand=True)
-            return var
-
-        e_msisdn  = _entry_widget(_row("MSISDN"), d.get("MSISDN", ""),
-                                  digits_only=True, max_len=9)
-
-        sc_row = _row("SIMCARD")
-        pfx = ctk.CTkEntry(
-            sc_row, fg_color=("#3D2260", "#C4B0DC"),
-            border_color=("#3D2260", "#C4B0DC"),
-            text_color=("#8B75B0", "#6B5A8A"),
-            font=FONT_MONO_S, height=36, width=80)
-        pfx.insert(0, "8999401")
-        pfx.configure(state="disabled")
-        pfx.pack(side="left", padx=(0, 4))
-        sc_vcmd = (dlg.register(
-            lambda s: (s == "" or s.isdigit()) and len(s) <= 13), "%P")
-        e_simcard = ctk.CTkEntry(
-            sc_row,
-            fg_color=("#251540", "#EDE8F5"), border_color=("#3D2260", "#C4B0DC"),
-            text_color=("#EDE8F5", "#1A0A2E"), font=FONT_MONO_S, height=36,
-            validate="key", validatecommand=sc_vcmd)
-        e_simcard.pack(side="left", fill="x", expand=True)
-        existing_sc = d.get("SIMCARD", "")
-        e_simcard.insert(0, existing_sc[7:] if existing_sc.startswith("8999401") else existing_sc)
-
-        v_plan    = _option_widget(_row("Plan Type"),
-                                   ["PostPaid", "Prepaid"],
-                                   d.get("PLAN_TYPE", "PostPaid"))
-        v_usage   = _option_widget(_row("Usage Type"),
-                                   ["VOICE", "DATA"],
-                                   d.get("USAGE", "VOICE"))
-        seg_disp  = _SEGMENT_RMAP.get(d.get("SEGMENT", "2"), "B2C  (2)")
-        v_seg     = _option_widget(_row("Segment"),
-                                   list(_SEGMENT_OPTS.keys()), seg_disp)
-        e_price   = _entry_widget(_row("Price (qepik)"),
-                                  d.get("PRICE", ""), digits_only=True, max_len=10)
-        pub_def   = "0  (not public)" if d.get("PUBLIC", "0") == "0" else "1  (public)"
-        v_public  = _option_widget(_row("Public"),
-                                   ["0  (not public)", "1  (public)"], pub_def)
-        v_numtype = _option_widget(_row("Number Type"),
-                                   ["EXTERNAL", "INTERNAL", "GOLDEN"],
-                                   d.get("NUMBER_TYPE", "EXTERNAL"))
-        e_desc    = _entry_widget(_row("Description"), d.get("DESCRIPTION", ""))
-
-        # ── Tariff (Number Update) ────────────────────
-        v_tariff  = _option_widget(_row("Update Tariff"),
-                                   _UPDATE_TARIFFS,
-                                   d.get("UPDATE_TARIFF", "normal"))
-
-        def save():
-            msisdn = e_msisdn.get().strip()
-            sc_sfx = e_simcard.get().strip()
-            if not msisdn or not sc_sfx:
-                return
-            row_data = {
-                "MSISDN":         msisdn,
-                "SIMCARD":        "8999401" + sc_sfx,
-                "PLAN_TYPE":      v_plan.get(),
-                "USAGE":          v_usage.get(),
-                "SEGMENT":        _SEGMENT_OPTS.get(v_seg.get(), "2"),
-                "PRICE":          e_price.get().strip(),
-                "PUBLIC":         v_public.get().split()[0],
-                "NUMBER_TYPE":    v_numtype.get(),
-                "DESCRIPTION":    e_desc.get().strip(),
-                "UPDATE_TARIFF":  v_tariff.get(),
-            }
-            if is_edit:
-                self._data[edit_idx] = row_data
-            else:
-                self._data.append(row_data)
-            self._render_data()
-            self._autosave()
-            dlg.destroy()
-
-        ctk.CTkButton(
-            dlg,
-            text="✎  Save Changes" if is_edit else T("save"),
-            fg_color="#B45309" if is_edit else "#5C2483",
-            hover_color="#92400E" if is_edit else "#7C6EB0",
-            text_color="white", font=("Segoe UI", 13, "bold"),
-            height=44, corner_radius=10, command=save
-        ).pack(fill="x", padx=16, pady=(0, 16))
-
-    # ── Start / Cancel / Done ──────────────────────────
+    # ══════════════════════════════════════════════════
+    #  START / CANCEL / DONE
+    # ══════════════════════════════════════════════════
     def _on_start(self):
         if self._running:
             return
 
-        username = self._np_user.get().strip()
-        password = self._np_pass.get().strip()
+        username = self._np_user.text().strip()
+        password = self._np_pass.text().strip()
 
+        ts = datetime.now().strftime("%H:%M:%S")
         missing = []
         if not username: missing.append("Username")
         if not password: missing.append("Password")
         if not self._data:
-            self._append_log(
-                datetime.now().strftime("%H:%M:%S"),
-                f"⚠ Planning data is empty — {self._T('val_not_selected')}", "error")
+            self._append_log(ts, f"⚠ Planning data is empty — {self._T('val_not_selected')}", "error")
             self._set_status(self._T("val_error_status"), C["error"], "#2A0A0A")
             return
         if missing:
-            ts = datetime.now().strftime("%H:%M:%S")
             for f in missing:
                 self._append_log(ts, f"⚠ '{f}' {self._T('val_not_selected')}", "error")
             self._set_status(self._T("val_error_status"), C["error"], "#2A0A0A")
@@ -745,13 +800,15 @@ class TabPlanning:
 
         self._running = True
         self._stop_ev.clear()
-        self._start_btn.configure(state="disabled")
-        self._cancel_btn.configure(state="normal")
+        self._start_btn.setEnabled(False)
+        self._cancel_btn.setEnabled(True)
         self._set_status(self._T("running"), C["warning"], "#2A1A05")
         self._append_log(datetime.now().strftime("%H:%M:%S"),
                          self._T("np_started"), "warning")
 
         data_snapshot = deepcopy(self._data)
+        _sig = _DoneSignal()
+        _sig.done.connect(self._on_done)
 
         def worker():
             try:
@@ -770,7 +827,6 @@ class TabPlanning:
                 if self._stop_ev.is_set():
                     return
 
-                # Use tariff from first data row (Number Update uses one tariff for all)
                 _tariff = data_snapshot[0].get("UPDATE_TARIFF", "normal") if data_snapshot else "normal"
                 cfg = {
                     "chromedriver": "",
@@ -794,7 +850,7 @@ class TabPlanning:
                     "msg": f"═══ ERROR: {e} ═══",
                     "level": "error", "_tab": "np"})
             finally:
-                self._tab.after(0, self._on_done)
+                _sig.done.emit()   # thread-safe → Qt signal
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -803,32 +859,48 @@ class TabPlanning:
         self._append_log(datetime.now().strftime("%H:%M:%S"),
                          self._T("cancel_msg"), "error")
         self._set_status(self._T("cancelled"), C["error"], "#2A0A0A")
-        self._cancel_btn.configure(state="disabled")
-        self._start_btn.configure(state="normal")
+        self._cancel_btn.setEnabled(False)
+        self._start_btn.setEnabled(True)
         self._running = False
 
     def _on_done(self):
         self._running = False
-        self._start_btn.configure(state="normal")
-        self._cancel_btn.configure(state="disabled")
+        self._start_btn.setEnabled(True)
+        self._cancel_btn.setEnabled(False)
         if not self._stop_ev.is_set():
             self._set_status(self._T("success_status"), C["success"], "#0B2210")
 
-    def _set_status(self, text, color, bg):
-        self._status_lbl.configure(
-            text=f"  {text}  ", text_color=color, fg_color=bg)
+    def _set_status(self, text: str, color: str, bg: str):
+        self._status_lbl.setText(f"  {text}  ")
+        self._status_lbl.setStyleSheet(
+            f"color:{color}; background:{bg}; border-radius:8px; padding:2px 10px;")
 
-    def append_log(self, ts, msg, level):
+    # ══════════════════════════════════════════════════
+    #  LOG  (called from main.py _poll via append_log)
+    # ══════════════════════════════════════════════════
+    def append_log(self, ts: str, msg: str, level: str):
         self._append_log(ts, msg, level)
 
-    def _append_log(self, ts, msg, level):
-        self._log_box.configure(state="normal")
-        self._log_box.insert("end", f"[{ts}] ", "ts")
-        self._log_box.insert("end", f"{msg}\n", level)
-        self._log_box.see("end")
-        self._log_box.configure(state="disabled")
+    def _append_log(self, ts: str, msg: str, level: str):
+        _COLORS = {
+            "info":    C["text"],
+            "success": C["success"],
+            "warning": C["warning"],
+            "error":   C["error"],
+        }
+        cursor = self._log_box.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        fmt_ts = QTextCharFormat()
+        fmt_ts.setForeground(QColor(C["muted"]))
+        cursor.insertText(f"[{ts}] ", fmt_ts)
+
+        fmt_msg = QTextCharFormat()
+        fmt_msg.setForeground(QColor(_COLORS.get(level, C["text"])))
+        cursor.insertText(f"{msg}\n", fmt_msg)
+
+        self._log_box.setTextCursor(cursor)
+        self._log_box.ensureCursorVisible()
 
     def _clear_log(self):
-        self._log_box.configure(state="normal")
-        self._log_box.delete("1.0", "end")
-        self._log_box.configure(state="disabled")
+        self._log_box.clear()
