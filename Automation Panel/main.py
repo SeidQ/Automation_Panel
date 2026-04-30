@@ -394,14 +394,27 @@ class App(QMainWindow):
         try:
             while True:
                 item = self._log_q.get_nowait()
-                if item.get("_tab") == "np":
+                msg  = item.get("msg", "")
+                tab  = item.get("_tab")
+
+                # Thread-safe done sentinels — main thread-də çağır
+                if msg == "__NP_DONE__":
+                    if hasattr(self._tab_plan, "_on_done"):
+                        self._tab_plan._on_done()
+                    continue
+                if msg == "__ACT_DONE__":
+                    if hasattr(self._tab_act, "_force_done"):
+                        self._tab_act._force_done()
+                    continue
+
+                if tab == "np":
                     if hasattr(self._tab_plan, "append_log"):
                         self._tab_plan.append_log(
-                            item["ts"], item["msg"], item["level"])
+                            item["ts"], msg, item["level"])
                 else:
                     if hasattr(self._tab_act, "append_log"):
                         self._tab_act.append_log(
-                            item["ts"], item["msg"], item["level"],
+                            item["ts"], msg, item["level"],
                             item.get("msisdn"),
                             step=item.get("step", 0),
                             done=item.get("done", False),

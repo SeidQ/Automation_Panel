@@ -17,14 +17,8 @@ from PyQt6.QtWidgets import (
     QTextEdit, QComboBox, QDialog, QSizePolicy, QSplitter,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QFont, QColor, QTextCursor
-
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.wait import WebDriverWait
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
+from PyQt6.QtGui import QFont, QColor, QTextCursor, QTextCharFormat
 
 from config import C, T, save_state, load_section
 from widgets import (
@@ -130,20 +124,20 @@ def build_csvs(data_rows):
 # ══════════════════════════════════════════════════════
 #  SELENIUM WORKER  (unchanged)
 # ══════════════════════════════════════════════════════
-def _find_chromedriver():
+def _find_edgedriver():
     import shutil
-    driver_path = shutil.which("chromedriver") or shutil.which("chromedriver.exe")
+    # selenium-manager avtomatik tapır — driver_path boş olsa belə işləyir
+    driver_path = shutil.which("msedgedriver") or shutil.which("msedgedriver.exe")
     if driver_path:
         return driver_path
     for candidate in [
-        rf"C:\Users\{os.getenv('USERNAME', '')}\Desktop\chromedriver-win64\chromedriver.exe",
-        rf"C:\Users\{os.getenv('USERNAME', '')}\Downloads\chromedriver-win64\chromedriver.exe",
-        r"C:\chromedriver\chromedriver.exe",
+        rf"C:\Users\{os.getenv('USERNAME', '')}\Desktop\msedgedriver.exe",
+        rf"C:\Users\{os.getenv('USERNAME', '')}\Downloads\msedgedriver.exe",
+        r"C:\edgedriver\msedgedriver.exe",
     ]:
         if os.path.exists(candidate):
             return candidate
-    raise FileNotFoundError(
-        "chromedriver not found. Please place it on PATH or set path manually.")
+    return ""  # boş qaytar — selenium-manager özü idarə edəcək
 
 
 def _wait_toast_gone(driver, wait):
@@ -155,147 +149,179 @@ def _wait_toast_gone(driver, wait):
 
 
 def run_number_planning(cfg, log_q, stop_ev):
+    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    import os, traceback
+
     def log(msg, level="info"):
         log_q.put({"ts": datetime.now().strftime("%H:%M:%S"),
                    "msg": msg, "level": level, "_tab": "np"})
 
-    driver_path = cfg.get("chromedriver", "").strip() or _find_chromedriver()
+    def wait_toast(page, timeout=30000):
+        """Toast görünənə qədər gözlə, sonra yox olana qədər gözlə."""
+        try:
+            page.wait_for_selector(
+                "snack-bar-container, mat-snack-bar-container, "
+                "div.success, div.alert, div.cdk-overlay-container",
+                timeout=timeout)
+        except Exception:
+            pass
+        try:
+            page.wait_for_selector(
+                "snack-bar-container, mat-snack-bar-container",
+                state="detached", timeout=10000)
+        except Exception:
+            pass
 
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless=new")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
+    def upload_file(page, file_path):
+        """fileInput-u görünən et və faylı yüklə."""
+        fi = page.locator("//input[@id='fileInput']").first
+        fi.evaluate("el => el.style.display='block'")
+        fi.set_input_files(file_path)
 
-    driver = webdriver.Chrome(service=Service(driver_path), options=options)
-    wait   = WebDriverWait(driver, 15)
-    wait30 = WebDriverWait(driver, 30)
+    print("[PLANNING] run_number_planning başladı", flush=True)
 
-    try:
-        log("🔐 Logging in to Dealer Express...")
-        driver.get(
-            "https://rhsso.azercell.com/auth/realms/external/protocol/openid-connect/auth"
-            "?client_id=dealer-manager"
-            "&redirect_uri=https%3A%2F%2Fdealerexpress.azercell.com%2Fnumbers"
-            "&state=9d426ab2-6db7-4242-8809-2293b6b219f6"
-            "&response_mode=fragment&response_type=code&scope=openid"
-            "&nonce=1f4053e4-a0d3-4be8-85c9-4021e95f00c6"
-        )
-        if stop_ev.is_set(): return
+    with sync_playwright() as pw:
+        log("🌐 Edge browser başladılır...")
+        try:
+            browser = pw.chromium.launch(
+                channel="msedge",
+                headless=False,
+                args=["--window-size=1920,1080"]
+            )
+            log("✓ Edge browser uğurla başladı.", "success")
+        except Exception as _drv_err:
+            traceback.print_exc()
+            log(f"✗ Edge driver xətası: {_drv_err}", "error")
+            raise
 
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "(//input[@id='username'])[1]"))).send_keys(cfg["username"])
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "(//input[@id='password'])[1]"))).send_keys(cfg["password"])
-        driver.find_element(By.XPATH, "(//input[@id='kc-login'])[1]").click()
-        wait30.until(EC.url_contains("dealerexpress.azercell.com"))
-        log("✓ Login successful.", "success")
+        page = browser.new_page()
+        page.set_default_timeout(30000)
 
-        # Step 1 — Assign to Contractor Dealer
-        if stop_ev.is_set(): return
-        log("🏢 Number Sales — Assigning to contractor dealer...")
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//li[@routerlink='/numbers']"))).click()
+        try:
+            # ── Login ──────────────────────────────────────────────
+            log("🔐 Dealer Express-ə daxil olunur...")
+            page.goto(
+                "https://dealerexpress.azercell.com/numbers",
+                timeout=30000, wait_until="domcontentloaded"
+            )
+            if stop_ev.is_set(): return
+            page.locator("(//input[@id='username'])[1]").fill(cfg["username"])
+            page.locator("(//input[@id='password'])[1]").fill(cfg["password"])
+            page.locator("(//input[@id='kc-login'])[1]").click()
+            page.wait_for_url("**/dealerexpress.azercell.com/**", timeout=30000)
+            page.wait_for_load_state("networkidle", timeout=30000)
+            log("✓ Login uğurlu.", "success")
 
-        radio = wait.until(EC.presence_of_element_located(
-            (By.XPATH, "//div[@class='mat-radio-label-content' "
-                       "and contains(text(),'Assign to contractor dealer')]")))
-        driver.execute_script("arguments[0].click();", radio)
+            # ── Step 1 — Number Planning (plan CSV) ────────────────
+            if stop_ev.is_set(): return
+            log("📋 Number Planning səhifəsinə keçilir...")
+            page.locator("//li[@routerlink='/planning']").wait_for(timeout=30000)
+            page.locator("//li[@routerlink='/planning']").click()
 
-        inp = wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//input[contains(@class,'mat-autocomplete-trigger')]")))
-        inp.click()
-        inp.send_keys("Azercell")
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[@class='mat-option-text' and contains(text(),'Azercell')]")
-        )).click()
-        log("  ✓ 'Azercell' selected.")
+            log("  → 'Preparing for resold' seçilir...")
+            page.locator("(//div[@class='mat-radio-label-content'])[2]").click()
+            log("  ✓ 'Preparing for resold' seçildi.")
 
-        fi = wait.until(EC.presence_of_element_located(
-            (By.XPATH, "//input[@id='fileInput']")))
-        driver.execute_script("arguments[0].style.display='block';", fi)
-        fi.send_keys(cfg["assign_file"])
+            log("  → Planning CSV yüklənir...")
+            upload_file(page, cfg["plan_file"])
+            log("  ✓ Planning CSV yükləndi.")
 
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[normalize-space()='Assign (File)']/parent::button"))).click()
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[normalize-space()='Assign to contractor dealer']/parent::button")
-        )).click()
-        log("  ✓ Assigned to contractor dealer (Azercell).", "success")
-        wait30.until(EC.presence_of_element_located(
-            (By.XPATH, "//snack-bar-container | //mat-snack-bar-container | "
-                       "//div[contains(@class,'success')] | //div[contains(@class,'alert')]")))
-        _wait_toast_gone(driver, wait)
+            page.locator("//span[normalize-space()='Plan numbers']/parent::button").click()
+            log("  ✓ 'Plan numbers' basıldı. Cavab gözlənilir...", "warning")
+            wait_toast(page, 30000)
+            log("  ✓ Planning tamamlandı.", "success")
 
-        # Step 2 — Number Planning
-        if stop_ev.is_set(): return
-        log("📋 Navigating to Number Planning...")
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//li[@routerlink='/planning']"))).click()
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "(//div[@class='mat-radio-label-content'])[2]"))).click()
-        log("  ✓ 'Preparing for resold' selected.")
+            # ── Step 2 — Number Update (update CSV) ───────────────
+            if stop_ev.is_set(): return
+            log("🔄 Number Update tabına keçilir...")
+            page.locator("(//div[@id='mat-tab-label-0-1'])").click()
 
-        fi = wait.until(EC.presence_of_element_located(
-            (By.XPATH, "//input[@id='fileInput']")))
-        driver.execute_script("arguments[0].style.display='block';", fi)
-        fi.send_keys(cfg["plan_file"])
-        log("  ✓ Planning CSV uploaded (is_public=0).")
+            _tariff = cfg.get("tariff", "normal")
+            # "Select activation tariff" dropdown-u tap və aç
+            page.get_by_label("Select activation tariff").click()
+            # Seçim paneli açılana qədər gözlə
+            page.wait_for_selector("mat-option", timeout=10000)
+            # Tarifl seç
+            page.locator(
+                f"//mat-option//span[@class='mat-option-text' and normalize-space()='{_tariff}']"
+            ).click()
+            log(f"  ✓ '{_tariff}' tarifi seçildi.", "success")
 
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[normalize-space()='Plan numbers']/parent::button"))).click()
-        log("  ✓ 'Plan numbers' clicked. Waiting for response...", "warning")
-        wait30.until(EC.presence_of_element_located(
-            (By.XPATH, "//snack-bar-container | //mat-snack-bar-container | "
-                       "//div[contains(@class,'success')] | //div[contains(@class,'alert')]")))
-        _wait_toast_gone(driver, wait)
+            log("  → Update CSV yüklənir...")
+            upload_file(page, cfg["update_file"])
+            log("  ✓ Update CSV yükləndi.")
 
-        # Step 3 — Number Update
-        if stop_ev.is_set(): return
-        log("🔄 Switching to Number Update tab...")
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "(//div[@id='mat-tab-label-0-1'])"))).click()
+            page.locator("//span[normalize-space()='Update numbers']/parent::button").click()
+            log("  ✓ 'Update numbers' basıldı.", "success")
+            wait_toast(page, 30000)
+            log("  ✓ Update tamamlandı.", "success")
 
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//mat-select[@id='mat-select-3']"))).click()
-        panel = wait.until(EC.presence_of_element_located(
-            (By.XPATH, "//div[contains(@class,'mat-select-panel')]")))
-        driver.execute_script("arguments[0].scrollTop = 1200;", panel)
+            # ── Step 3 — Number Sales: Assign to Contractor Dealer ─
+            if stop_ev.is_set(): return
+            log("🏢 Number Sales — Contractor dealer-ə assign edilir...")
+            page.locator("//li[@routerlink='/numbers']").click()
 
-        _tariff = cfg.get("tariff", "normal")
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, f"//span[@class='mat-option-text' and normalize-space()='{_tariff}']")
-        )).click()
-        log(f"  ✓ '{_tariff}' tariff selected.", "success")
+            radio = page.locator(
+                "//div[@class='mat-radio-label-content' "
+                "and contains(text(),'Assign to contractor dealer')]")
+            radio.evaluate("el => el.click()")
+            log("  ✓ 'Assign to contractor dealer' seçildi.")
 
-        fi = wait.until(EC.presence_of_element_located(
-            (By.XPATH, "//input[@id='fileInput']")))
-        driver.execute_script("arguments[0].style.display='block';", fi)
-        fi.send_keys(cfg["update_file"])
-        log("  ✓ Update CSV uploaded.")
+            inp = page.get_by_role("combobox", name="Select a contractor dealer")
+            inp.click()
+            inp.fill("Azercell")
+            page.locator(
+                "//span[@class='mat-option-text' and contains(text(),'Azercell')]"
+            ).click()
+            log("  ✓ 'Azercell' seçildi.")
 
-        wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[normalize-space()='Update numbers']/parent::button"))).click()
-        log("  ✓ 'Update numbers' clicked.", "success")
-        wait30.until(EC.presence_of_element_located(
-            (By.XPATH, "//snack-bar-container | //mat-snack-bar-container | "
-                       "//div[contains(@class,'success')] | //div[contains(@class,'alert')]")))
-        _wait_toast_gone(driver, wait)
+            # ── Step 3a — Assign CSV yüklə ─────────────────────────
+            log("  → Assign CSV (MSISDN) yüklənir...")
+            upload_file(page, cfg["assign_file"])
+            log("  ✓ Assign CSV yükləndi.")
 
-        log("✅ Number Planning flow completed successfully!", "success")
+            # ── Step 3b — "Saytda əks olunmasın" checkbox ──────────
+            _any_not_public = any(
+                str(d.get("PUBLIC", "1")).strip() == "0"
+                for d in cfg.get("_data_rows", [])
+            )
+            if _any_not_public:
+                try:
+                    log("🔒 'Saytda əks olunmasın' checkbox işarələnir...")
+                    cb_el = page.locator(
+                        "//label[@for='mat-checkbox-3-input']"
+                        "//div[@class='mat-checkbox-inner-container']")
+                    cb_el.evaluate("el => el.click()")
+                    log("  ✓ Checkbox işarələndi → not public.", "success")
+                except Exception as _ce:
+                    log(f"  ⚠ Checkbox tapılmadı: {_ce}", "warning")
+            else:
+                log("  ✓ Public=1 — checkbox toxunulmadı (default public).")
 
-    except Exception as e:
-        log(f"✗ ERROR: {e}", "error")
-        raise
-    finally:
-        driver.quit()
-        for p in [cfg.get("plan_file"), cfg.get("update_file"), cfg.get("assign_file")]:
-            try:
-                if p and os.path.exists(p):
-                    os.remove(p)
-            except Exception:
-                pass
+            # ── Step 3c — Assign et ────────────────────────────────
+            page.locator(
+                "//span[normalize-space()='Assign (File)']/parent::button"
+            ).click()
+            page.locator(
+                "//span[normalize-space()='Assign to contractor dealer']/parent::button"
+            ).click()
+            log("  ✓ 'Assign to contractor dealer' basıldı.", "success")
+            wait_toast(page, 30000)
+            log("  ✓ Assign tamamlandı.", "success")
+
+            log("✅ Number Planning axını uğurla tamamlandı!", "success")
+
+        except Exception as e:
+            log(f"✗ ERROR: {e}", "error")
+            raise
+        finally:
+            browser.close()
+            for p in [cfg.get("plan_file"), cfg.get("update_file"), cfg.get("assign_file")]:
+                try:
+                    if p and os.path.exists(p):
+                        os.remove(p)
+                except Exception:
+                    pass
 
 
 # ══════════════════════════════════════════════════════
@@ -303,8 +329,58 @@ def run_number_planning(cfg, log_q, stop_ev):
 #  (QThread alternative — uses plain thread + QTimer poll
 #   same as main.py _poll mechanism, already wired up)
 # ══════════════════════════════════════════════════════
-class _DoneSignal(QObject):
-    done = pyqtSignal()
+class _NpWorker(QThread):
+    """QThread worker — PyQt6/Windows üçün thread-safe."""
+    def __init__(self, cfg, log_q, stop_ev, T_np_done):
+        super().__init__()
+        self._cfg       = cfg
+        self._log_q     = log_q
+        self._stop_ev   = stop_ev
+        self._T_np_done = T_np_done
+
+    def run(self):
+        import sys, traceback
+        print("[NpWorker] run() başladı", flush=True)
+        try:
+            print("[NpWorker] CSV yaradılır...", flush=True)
+            self._log_q.put({
+                "ts": datetime.now().strftime("%H:%M:%S"),
+                "msg": f"📄 Generating CSVs for {len(self._cfg['_data_rows'])} row(s)...",
+                "level": "info", "_tab": "np"})
+
+            plan_path, update_path, assign_path = build_csvs(self._cfg["_data_rows"])
+            self._cfg["plan_file"]   = plan_path
+            self._cfg["update_file"] = update_path
+            self._cfg["assign_file"] = assign_path
+            print("[NpWorker] CSV hazır", flush=True)
+
+            self._log_q.put({
+                "ts": datetime.now().strftime("%H:%M:%S"),
+                "msg": "✓ CSVs generated.",
+                "level": "success", "_tab": "np"})
+
+            if self._stop_ev.is_set():
+                return
+
+            run_number_planning(self._cfg, self._log_q, self._stop_ev)
+
+            self._log_q.put({
+                "ts": datetime.now().strftime("%H:%M:%S"),
+                "msg": self._T_np_done,
+                "level": "success", "_tab": "np"})
+
+        except Exception as e:
+            print(f"[NpWorker] XƏTA: {e}", flush=True)
+            traceback.print_exc()
+            self._log_q.put({
+                "ts": datetime.now().strftime("%H:%M:%S"),
+                "msg": f"═══ ERROR: {e} ═══",
+                "level": "error", "_tab": "np"})
+        finally:
+            print("[NpWorker] finally — done", flush=True)
+            self._log_q.put({
+                "ts": "", "msg": "__NP_DONE__",
+                "level": "info", "_tab": "np"})
 
 
 # ══════════════════════════════════════════════════════
@@ -403,7 +479,7 @@ class _RowDialog(QDialog):
         pub_def = "0  (not public)" if d.get("PUBLIC", "0") == "0" else "1  (public)"
         self._cb_public  = mk_combo(["0  (not public)", "1  (public)"], pub_def)
         self._cb_numtype = mk_combo(
-            ["EXTERNAL", "INTERNAL", "GOLDEN"], d.get("NUMBER_TYPE", "EXTERNAL"))
+            ["EXTERNAL", "INTERNAL"], d.get("NUMBER_TYPE", "EXTERNAL"))
         self._cb_tariff  = mk_combo(_UPDATE_TARIFFS, d.get("UPDATE_TARIFF", "normal"))
 
         form_lay.addLayout(mk_field_row("Plan Type",     self._cb_plan))
@@ -655,10 +731,10 @@ class TabPlanning(QWidget):
 
         # Data table — QTableWidget
         self._data_table = _ClearableTable()
-        self._data_table.setColumnCount(9)
+        self._data_table.setColumnCount(10)
         self._data_table.setHorizontalHeaderLabels(
             ["#", "MSISDN", "SIMCARD", "PLAN",
-             "USAGE", "SEG", "PRICE", "PUB", "TYPE"])
+             "USAGE", "SEG", "PRICE", "PUB", "TYPE", "TARIFF"])
         self._data_table.setMinimumHeight(180)
         self._data_table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows)
@@ -766,6 +842,7 @@ class TabPlanning(QWidget):
                 d.get("PRICE", ""),
                 d.get("PUBLIC", "0"),
                 d.get("NUMBER_TYPE", "EXTERNAL"),
+                d.get("UPDATE_TARIFF", "normal"),
             ]
             for ci, val in enumerate(vals):
                 item = QTableWidgetItem(val)
@@ -818,81 +895,59 @@ class TabPlanning(QWidget):
     #  START / CANCEL / DONE
     # ══════════════════════════════════════════════════
     def _on_start(self):
+        # Artıq işləyirsə ikinci dəfə başlatma
         if self._running:
             return
 
+        # ── Validasiya ─────────────────────────────────
         username = self._np_user.text().strip()
         password = self._np_pass.text().strip()
-
         ts = datetime.now().strftime("%H:%M:%S")
-        missing = []
-        if not username: missing.append("Username")
-        if not password: missing.append("Password")
-        if not self._data:
-            self._append_log(ts, f"⚠ Planning data is empty — {self._T('val_not_selected')}", "error")
-            self._set_status(self._T("val_error_status"), C["error"], "#2A0A0A")
-            return
-        if missing:
-            for f in missing:
-                self._append_log(ts, f"⚠ '{f}' {self._T('val_not_selected')}", "error")
-            self._set_status(self._T("val_error_status"), C["error"], "#2A0A0A")
+
+        if not username or not password:
+            self._append_log(ts, "✗ Username və ya Password boşdur!", "error")
             return
 
-        self._running = True
+        if not self._data:
+            self._append_log(ts,
+                "✗ Planning data cədvəli boşdur! Əvvəlcə 'Add' ilə data əlavə et.",
+                "error")
+            return
+
+        # ── Əvvəlki cancel-dən qalan stop event-i sıfırla ──
         self._stop_ev.clear()
+
+        # ── UI vəziyyəti ───────────────────────────────
+        self._running = True
         self._start_btn.setEnabled(False)
         self._cancel_btn.setEnabled(True)
-        self._set_status(self._T("running"), C["warning"], "#2A1A05")
-        self._append_log(datetime.now().strftime("%H:%M:%S"),
-                         self._T("np_started"), "warning")
+        self._set_status(self._T("running"), C["warning"], "#2A1A00")
+        self._log_box.clear()
+        self._append_log(ts,
+            f"🚀 Number Planning başladılır ({len(self._data)} nömrə)...",
+            "info")
 
-        data_snapshot = deepcopy(self._data)
-        _sig = _DoneSignal()
-        _sig.done.connect(self._on_done)
+        # ── Worker konfiqurasiyası ─────────────────────
+        # UPDATE_TARIFF — bütün rowlarda eyni olmalıdır, ilk rowdan götür
+        _tariff = "normal"
+        if self._data:
+            _tariff = self._data[0].get("UPDATE_TARIFF", "normal")
 
-        def worker():
-            try:
-                self._log_q.put({
-                    "ts": datetime.now().strftime("%H:%M:%S"),
-                    "msg": f"📄 Generating CSVs for {len(data_snapshot)} row(s)...",
-                    "level": "info", "_tab": "np"})
+        cfg = {
+            "username":   username,
+            "password":   password,
+            "tariff":     _tariff,
+            "_data_rows": self._data,
+        }
 
-                plan_path, update_path, assign_path = build_csvs(data_snapshot)
+        # T("np_done") varsa istifadə et, yoxdursa fallback
+        try:
+            done_msg = self._T("np_done")
+        except Exception:
+            done_msg = "✅ Number Planning tamamlandı!"
 
-                self._log_q.put({
-                    "ts": datetime.now().strftime("%H:%M:%S"),
-                    "msg": "✓ CSVs generated (plain text, no quotes).",
-                    "level": "success", "_tab": "np"})
-
-                if self._stop_ev.is_set():
-                    return
-
-                _tariff = data_snapshot[0].get("UPDATE_TARIFF", "normal") if data_snapshot else "normal"
-                cfg = {
-                    "chromedriver": "",
-                    "username":     username,
-                    "password":     password,
-                    "tariff":       _tariff,
-                    "plan_file":    plan_path,
-                    "update_file":  update_path,
-                    "assign_file":  assign_path,
-                }
-                run_number_planning(cfg, self._log_q, self._stop_ev)
-
-                self._log_q.put({
-                    "ts": datetime.now().strftime("%H:%M:%S"),
-                    "msg": self._T("np_done"),
-                    "level": "success", "_tab": "np"})
-
-            except Exception as e:
-                self._log_q.put({
-                    "ts": datetime.now().strftime("%H:%M:%S"),
-                    "msg": f"═══ ERROR: {e} ═══",
-                    "level": "error", "_tab": "np"})
-            finally:
-                _sig.done.emit()   # thread-safe → Qt signal
-
-        threading.Thread(target=worker, daemon=True).start()
+        self._worker = _NpWorker(cfg, self._log_q, self._stop_ev, done_msg)
+        self._worker.start()
 
     def _on_cancel(self):
         self._stop_ev.set()
@@ -919,6 +974,9 @@ class TabPlanning(QWidget):
     #  LOG  (called from main.py _poll via append_log)
     # ══════════════════════════════════════════════════
     def append_log(self, ts: str, msg: str, level: str):
+        if msg == "__NP_DONE__":
+            self._on_done()
+            return
         self._append_log(ts, msg, level)
 
     def _append_log(self, ts: str, msg: str, level: str):

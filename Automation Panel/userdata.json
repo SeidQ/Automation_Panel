@@ -12,15 +12,15 @@
     "maximized": false
   },
   "planning": {
-    "username": "ccequlamova",
-    "password": "Yltak_141012#",
+    "username": "sgaziyev",
+    "password": "Seid230976?",
     "planning_data": [
       {
-        "MSISDN": "111111111",
-        "SIMCARD": "89994011111111111111",
+        "MSISDN": "108125046",
+        "SIMCARD": "89994012309254953879",
         "PLAN_TYPE": "PostPaid",
         "USAGE": "VOICE",
-        "SEGMENT": "4",
+        "SEGMENT": "2",
         "PRICE": "",
         "PUBLIC": "0",
         "NUMBER_TYPE": "EXTERNAL",
